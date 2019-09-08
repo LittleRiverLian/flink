@@ -27,19 +27,24 @@ import org.apache.flink.runtime.blob.BlobStoreService;
 import org.apache.flink.runtime.blob.BlobUtils;
 import org.apache.flink.runtime.dispatcher.Dispatcher;
 import org.apache.flink.runtime.highavailability.nonha.embedded.EmbeddedHaServices;
+import org.apache.flink.runtime.highavailability.nonha.standalone.StandaloneClientHAServices;
 import org.apache.flink.runtime.highavailability.nonha.standalone.StandaloneHaServices;
+import org.apache.flink.runtime.highavailability.zookeeper.ZooKeeperClientHAServices;
 import org.apache.flink.runtime.highavailability.zookeeper.ZooKeeperHaServices;
 import org.apache.flink.runtime.jobmanager.HighAvailabilityMode;
 import org.apache.flink.runtime.jobmaster.JobMaster;
 import org.apache.flink.runtime.net.SSLUtils;
 import org.apache.flink.runtime.resourcemanager.ResourceManager;
 import org.apache.flink.runtime.rpc.akka.AkkaRpcServiceUtils;
-import org.apache.flink.runtime.util.LeaderRetrievalUtils;
 import org.apache.flink.runtime.util.ZooKeeperUtils;
 import org.apache.flink.util.ConfigurationException;
 import org.apache.flink.util.FlinkException;
 import org.apache.flink.util.InstantiationUtil;
 
+import org.apache.curator.framework.CuratorFramework;
+
+import java.net.InetAddress;
+import java.net.UnknownHostException;
 import java.util.concurrent.Executor;
 
 import static org.apache.flink.util.Preconditions.checkNotNull;
@@ -52,7 +57,7 @@ public class HighAvailabilityServicesUtils {
 	public static HighAvailabilityServices createAvailableOrEmbeddedServices(
 		Configuration config,
 		Executor executor) throws Exception {
-		HighAvailabilityMode highAvailabilityMode = LeaderRetrievalUtils.getRecoveryMode(config);
+		HighAvailabilityMode highAvailabilityMode = HighAvailabilityMode.fromConfig(config);
 
 		switch (highAvailabilityMode) {
 			case NONE:
@@ -80,7 +85,7 @@ public class HighAvailabilityServicesUtils {
 		Executor executor,
 		AddressResolution addressResolution) throws Exception {
 
-		HighAvailabilityMode highAvailabilityMode = LeaderRetrievalUtils.getRecoveryMode(configuration);
+		HighAvailabilityMode highAvailabilityMode = HighAvailabilityMode.fromConfig(configuration);
 
 		switch (highAvailabilityMode) {
 			case NONE:
@@ -104,19 +109,15 @@ public class HighAvailabilityServicesUtils {
 					Dispatcher.DISPATCHER_NAME,
 					addressResolution,
 					configuration);
-
-				final String address = checkNotNull(configuration.getString(RestOptions.ADDRESS),
-					"%s must be set",
-					RestOptions.ADDRESS.key());
-				final int port = configuration.getInteger(RestOptions.PORT);
-				final boolean enableSSL = SSLUtils.isRestSSLEnabled(configuration);
-				final String protocol = enableSSL ? "https://" : "http://";
+				final String webMonitorAddress = getWebMonitorAddress(
+					configuration,
+					addressResolution);
 
 				return new StandaloneHaServices(
 					resourceManagerRpcUrl,
 					dispatcherRpcUrl,
 					jobManagerRpcUrl,
-					String.format("%s%s:%s", protocol, address, port));
+					webMonitorAddress);
 			case ZOOKEEPER:
 				BlobStoreService blobStoreService = BlobUtils.createBlobStoreFromConfig(configuration);
 
@@ -129,6 +130,23 @@ public class HighAvailabilityServicesUtils {
 			case FACTORY_CLASS:
 				return createCustomHAServices(configuration, executor);
 
+			default:
+				throw new Exception("Recovery mode " + highAvailabilityMode + " is not supported.");
+		}
+	}
+
+	public static ClientHighAvailabilityServices createClientHAService(Configuration configuration) throws Exception {
+		HighAvailabilityMode highAvailabilityMode = HighAvailabilityMode.fromConfig(configuration);
+
+		switch (highAvailabilityMode) {
+			case NONE:
+				final String webMonitorAddress = getWebMonitorAddress(configuration, AddressResolution.TRY_ADDRESS_RESOLUTION);
+				return new StandaloneClientHAServices(webMonitorAddress);
+			case ZOOKEEPER:
+				final CuratorFramework client = ZooKeeperUtils.startCuratorFramework(configuration);
+				return new ZooKeeperClientHAServices(client, configuration);
+			case FACTORY_CLASS:
+				return createCustomClientHAServices(configuration);
 			default:
 				throw new Exception("Recovery mode " + highAvailabilityMode + " is not supported.");
 		}
@@ -161,24 +179,35 @@ public class HighAvailabilityServicesUtils {
 		return Tuple2.of(hostname, port);
 	}
 
-	private static HighAvailabilityServices createCustomHAServices(Configuration config, Executor executor) throws FlinkException {
-		final ClassLoader classLoader = Thread.currentThread().getContextClassLoader();
-		final String haServicesClassName = config.getString(HighAvailabilityOptions.HA_MODE);
+	/**
+	 * Get address of web monitor from configuration.
+	 *
+	 * @param configuration Configuration contains those for WebMonitor.
+	 * @param resolution Whether to try address resolution of the given hostname or not.
+	 *                   This allows to fail fast in case that the hostname cannot be resolved.
+	 * @return Address of WebMonitor.
+	 */
+	public static String getWebMonitorAddress(
+		Configuration configuration,
+		HighAvailabilityServicesUtils.AddressResolution resolution) throws UnknownHostException {
+		final String address = checkNotNull(configuration.getString(RestOptions.ADDRESS), "%s must be set", RestOptions.ADDRESS.key());
 
-		final HighAvailabilityServicesFactory highAvailabilityServicesFactory;
-
-		try {
-			highAvailabilityServicesFactory = InstantiationUtil.instantiate(
-				haServicesClassName,
-				HighAvailabilityServicesFactory.class,
-				classLoader);
-		} catch (Exception e) {
-			throw new FlinkException(
-				String.format(
-					"Could not instantiate the HighAvailabilityServicesFactory '%s'. Please make sure that this class is on your class path.",
-					haServicesClassName),
-				e);
+		if (resolution == HighAvailabilityServicesUtils.AddressResolution.TRY_ADDRESS_RESOLUTION) {
+			// Fail fast if the hostname cannot be resolved
+			//noinspection ResultOfMethodCallIgnored
+			InetAddress.getByName(address);
 		}
+
+		final int port = configuration.getInteger(RestOptions.PORT);
+		final boolean enableSSL = SSLUtils.isRestSSLEnabled(configuration);
+		final String protocol = enableSSL ? "https://" : "http://";
+
+		return String.format("%s%s:%s", protocol, address, port);
+	}
+
+	private static HighAvailabilityServices createCustomHAServices(Configuration config, Executor executor) throws FlinkException {
+		final HighAvailabilityServicesFactory highAvailabilityServicesFactory = loadCustomHighAvailabilityServicesFactory(
+			config.getString(HighAvailabilityOptions.HA_MODE));
 
 		try {
 			return highAvailabilityServicesFactory.createHAServices(config, executor);
@@ -186,7 +215,31 @@ public class HighAvailabilityServicesUtils {
 			throw new FlinkException(
 				String.format(
 					"Could not create the ha services from the instantiated HighAvailabilityServicesFactory %s.",
-					haServicesClassName),
+					highAvailabilityServicesFactory.getClass().getName()),
+				e);
+		}
+	}
+
+	private static HighAvailabilityServicesFactory loadCustomHighAvailabilityServicesFactory(String highAvailabilityServicesFactoryClassName) throws FlinkException {
+		final ClassLoader classLoader = Thread.currentThread().getContextClassLoader();
+
+		return InstantiationUtil.instantiate(
+			highAvailabilityServicesFactoryClassName,
+			HighAvailabilityServicesFactory.class,
+			classLoader);
+	}
+
+	private static ClientHighAvailabilityServices createCustomClientHAServices(Configuration config) throws FlinkException {
+		final HighAvailabilityServicesFactory highAvailabilityServicesFactory = loadCustomHighAvailabilityServicesFactory(
+			config.getString(HighAvailabilityOptions.HA_MODE));
+
+		try {
+			return highAvailabilityServicesFactory.createClientHAServices(config);
+		} catch (Exception e) {
+			throw new FlinkException(
+				String.format(
+					"Could not create the client ha services from the instantiated HighAvailabilityServicesFactory %s.",
+					highAvailabilityServicesFactory.getClass().getName()),
 				e);
 		}
 	}

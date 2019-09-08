@@ -223,8 +223,7 @@ public class RemoteStreamEnvironment extends StreamExecutionEnvironment {
 		String jobName,
 		SavepointRestoreSettings savepointRestoreSettings
 	) throws ProgramInvocationException {
-		StreamGraph streamGraph = streamExecutionEnvironment.getStreamGraph();
-		streamGraph.setJobName(jobName);
+		StreamGraph streamGraph = streamExecutionEnvironment.getStreamGraph(jobName);
 		return executeRemotely(streamGraph,
 			streamExecutionEnvironment.getClass().getClassLoader(),
 			streamExecutionEnvironment.getConfig(),
@@ -275,8 +274,6 @@ public class RemoteStreamEnvironment extends StreamExecutionEnvironment {
 				streamGraph.getJobGraph().getJobID(), e);
 		}
 
-		client.setPrintStatusDuringExecution(executionConfig.isSysoutLoggingEnabled());
-
 		if (savepointRestoreSettings == null) {
 			savepointRestoreSettings = SavepointRestoreSettings.none();
 		}
@@ -295,7 +292,7 @@ public class RemoteStreamEnvironment extends StreamExecutionEnvironment {
 		}
 		finally {
 			try {
-				client.shutdown();
+				client.close();
 			} catch (Exception e) {
 				LOG.warn("Could not properly shut down the cluster client.", e);
 			}
@@ -303,9 +300,7 @@ public class RemoteStreamEnvironment extends StreamExecutionEnvironment {
 	}
 
 	@Override
-	public JobExecutionResult execute(String jobName) throws ProgramInvocationException {
-		StreamGraph streamGraph = getStreamGraph();
-		streamGraph.setJobName(jobName);
+	public JobExecutionResult execute(StreamGraph streamGraph) throws Exception {
 		transformations.clear();
 		return executeRemotely(streamGraph, jarFiles);
 	}

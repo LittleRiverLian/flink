@@ -192,7 +192,7 @@ public class SavepointITCase extends TestLogger {
 
 			StatefulCounter.getProgressLatch().await();
 
-			return client.triggerSavepoint(jobId, null).get();
+			return client.cancelWithSavepoint(jobId, null);
 		} finally {
 			cluster.after();
 			StatefulCounter.resetForTest(parallelism);
@@ -446,7 +446,7 @@ public class SavepointITCase extends TestLogger {
 			cluster.after();
 		}
 
-		// create a new TestingCluster to make sure we start with completely
+		// create a new MiniCluster to make sure we start with completely
 		// new resources
 		cluster = new MiniClusterWithClientResource(
 			new MiniClusterResourceConfiguration.Builder()
@@ -510,7 +510,6 @@ public class SavepointITCase extends TestLogger {
 		env.setParallelism(parallelism);
 		env.disableOperatorChaining();
 		env.getConfig().setRestartStrategy(RestartStrategies.fixedDelayRestart(numberOfRetries, restartDelay));
-		env.getConfig().disableSysoutLogging();
 
 		DataStream<Integer> stream = env
 			.addSource(new InfiniteTestSource())
@@ -659,8 +658,7 @@ public class SavepointITCase extends TestLogger {
 
 		iteration.closeWith(iterationBody);
 
-		StreamGraph streamGraph = env.getStreamGraph();
-		streamGraph.setJobName("Test");
+		StreamGraph streamGraph = env.getStreamGraph("Test");
 
 		JobGraph jobGraph = streamGraph.getJobGraph();
 

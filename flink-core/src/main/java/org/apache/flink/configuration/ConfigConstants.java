@@ -204,7 +204,7 @@ public final class ConfigConstants {
 	public static final String TASK_MANAGER_IPC_PORT_KEY = "taskmanager.rpc.port";
 
 	/**
-	 * @deprecated use {@link TaskManagerOptions#DATA_PORT} instead
+	 * @deprecated use {@link NettyShuffleEnvironmentOptions#DATA_PORT} instead
 	 */
 	@Deprecated
 	public static final String TASK_MANAGER_DATA_PORT_KEY = "taskmanager.data.port";
@@ -212,7 +212,7 @@ public final class ConfigConstants {
 	/**
 	 * Config parameter to override SSL support for taskmanager's data transport.
 	 *
-	 * @deprecated use {@link TaskManagerOptions#DATA_SSL_ENABLED} instead
+	 * @deprecated use {@link NettyShuffleEnvironmentOptions#DATA_SSL_ENABLED} instead
 	 */
 	@Deprecated
 	public static final String TASK_MANAGER_DATA_SSL_ENABLED = "taskmanager.data.ssl.enabled";
@@ -270,7 +270,7 @@ public final class ConfigConstants {
 	 * The config parameter defining the number of buffers used in the network stack. This defines the
 	 * number of possible tasks and shuffles.
 	 *
-	 * @deprecated Use {@link TaskManagerOptions#NETWORK_NUM_BUFFERS} instead
+	 * @deprecated Use {@link NettyShuffleEnvironmentOptions#NETWORK_NUM_BUFFERS} instead
 	 */
 	@Deprecated
 	public static final String TASK_MANAGER_NETWORK_NUM_BUFFERS_KEY = "taskmanager.network.numberOfBuffers";
@@ -284,9 +284,9 @@ public final class ConfigConstants {
 	public static final String TASK_MANAGER_MEMORY_SEGMENT_SIZE_KEY = "taskmanager.memory.segment-size";
 
 	/**
-	 * The implementation to use for spillable/spilled intermediate results, which have both
-	 * synchronous and asynchronous implementations: "sync" or "async".
+	 * @deprecated Not used anymore
 	 */
+	@Deprecated
 	public static final String TASK_MANAGER_NETWORK_DEFAULT_IO_MODE = "taskmanager.network.defaultIOMode";
 
 	/**
@@ -1044,11 +1044,6 @@ public final class ConfigConstants {
 	@PublicEvolving
 	public static final String HA_JOB_MANAGER_PORT = "high-availability.jobmanager.port";
 
-	/** @deprecated Deprecated in favour of {@link HighAvailabilityOptions#HA_JOB_DELAY}. */
-	@PublicEvolving
-	@Deprecated
-	public static final String HA_JOB_DELAY = "high-availability.job.delay";
-
 	/** @deprecated Deprecated in favour of {@link #HA_MODE}. */
 	@Deprecated
 	public static final String RECOVERY_MODE = "recovery.mode";
@@ -1057,7 +1052,7 @@ public final class ConfigConstants {
 	@Deprecated
 	public static final String RECOVERY_JOB_MANAGER_PORT = "recovery.jobmanager.port";
 
-	/** @deprecated Deprecated in favour of {@link #HA_JOB_DELAY}. */
+	/** @deprecated This option is no longer used and has no effect on Flink. */
 	@Deprecated
 	public static final String RECOVERY_JOB_DELAY = "recovery.job.delay";
 
@@ -1241,6 +1236,9 @@ public final class ConfigConstants {
 	/** The class of the reporter to use. This is used as a suffix in an actual reporter config */
 	public static final String METRICS_REPORTER_CLASS_SUFFIX = "class";
 
+	/** The class of the reporter factory to use. This is used as a suffix in an actual reporter config */
+	public static final String METRICS_REPORTER_FACTORY_CLASS_SUFFIX = "factory.class";
+
 	/** The interval between reports. This is used as a suffix in an actual reporter config */
 	public static final String METRICS_REPORTER_INTERVAL_SUFFIX = "interval";
 
@@ -1389,7 +1387,7 @@ public final class ConfigConstants {
 	 * The default network port the task manager expects to receive transfer envelopes on. The {@code 0} means that
 	 * the TaskManager searches for a free port.
 	 *
-	 * @deprecated use {@link TaskManagerOptions#DATA_PORT} instead
+	 * @deprecated use {@link NettyShuffleEnvironmentOptions#DATA_PORT} instead
 	 */
 	@Deprecated
 	public static final int DEFAULT_TASK_MANAGER_DATA_PORT = 0;
@@ -1397,7 +1395,7 @@ public final class ConfigConstants {
 	/**
 	 * The default value to override ssl support for task manager's data transport.
 	 *
-	 * @deprecated use {@link TaskManagerOptions#DATA_SSL_ENABLED} instead
+	 * @deprecated use {@link NettyShuffleEnvironmentOptions#DATA_SSL_ENABLED} instead
 	 */
 	@Deprecated
 	public static final boolean DEFAULT_TASK_MANAGER_DATA_SSL_ENABLED = true;
@@ -1421,7 +1419,7 @@ public final class ConfigConstants {
 	/**
 	 * Config key has been deprecated. Therefore, no default value required.
 	 *
-	 * @deprecated {@link TaskManagerOptions#NETWORK_NUM_BUFFERS} provides the default value now
+	 * @deprecated {@link NettyShuffleEnvironmentOptions#NETWORK_NUM_BUFFERS} provides the default value now
 	 */
 	@Deprecated
 	public static final int DEFAULT_TASK_MANAGER_NETWORK_NUM_BUFFERS = 2048;
@@ -1435,9 +1433,9 @@ public final class ConfigConstants {
 	public static final int DEFAULT_TASK_MANAGER_MEMORY_SEGMENT_SIZE = 32768;
 
 	/**
-	 * The implementation to use for spillable/spilled intermediate results, which have both
-	 * synchronous and asynchronous implementations: "sync" or "async".
+	 * @deprecated Not used anymore
 	 */
+	@Deprecated
 	public static final String DEFAULT_TASK_MANAGER_NETWORK_DEFAULT_IO_MODE = "sync";
 
 	/**
@@ -1863,6 +1861,10 @@ public final class ConfigConstants {
 	@Deprecated
 	public static final int DEFAULT_LOCAL_NUMBER_RESOURCE_MANAGER = 1;
 
+	/**
+	 * @deprecated Has no effect; the web-server is always started. Will be removed in 2.0.
+	 */
+	@Deprecated
 	public static final String LOCAL_START_WEBSERVER = "local.start-webserver";
 
 	// --------------------------- High Availability ---------------------------------
@@ -2004,6 +2006,12 @@ public final class ConfigConstants {
 
 	/** The environment variable name which contains the location of the lib folder. */
 	public static final String ENV_FLINK_LIB_DIR = "FLINK_LIB_DIR";
+
+	/** The environment variable name which contains the location of the opt directory. */
+	public static final String ENV_FLINK_OPT_DIR = "FLINK_OPT_DIR";
+
+	/** The environment variable name which contains the location of the plugins folder. */
+	public static final String ENV_FLINK_PLUGINS_DIR = "FLINK_PLUGINS_DIR";
 
 	/** The environment variable name which contains the location of the bin directory. */
 	public static final String ENV_FLINK_BIN_DIR = "FLINK_BIN_DIR";

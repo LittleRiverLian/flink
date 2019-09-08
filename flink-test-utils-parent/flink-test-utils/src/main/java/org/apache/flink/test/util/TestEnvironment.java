@@ -18,7 +18,6 @@
 
 package org.apache.flink.test.util;
 
-import org.apache.flink.api.common.CodeAnalysisMode;
 import org.apache.flink.api.common.JobExecutionResult;
 import org.apache.flink.api.common.Plan;
 import org.apache.flink.api.java.ExecutionEnvironment;
@@ -66,9 +65,6 @@ public class TestEnvironment extends ExecutionEnvironment {
 
 		setParallelism(parallelism);
 
-		// disabled to improve build time
-		getConfig().setCodeAnalysisMode(CodeAnalysisMode.DISABLE);
-
 		if (isObjectReuseEnabled) {
 			getConfig().enableObjectReuse();
 		} else {
@@ -98,10 +94,6 @@ public class TestEnvironment extends ExecutionEnvironment {
 		else {
 			return lastEnv.getLastJobExecutionResult();
 		}
-	}
-
-	@Override
-	public void startNewSession() throws Exception {
 	}
 
 	@Override
