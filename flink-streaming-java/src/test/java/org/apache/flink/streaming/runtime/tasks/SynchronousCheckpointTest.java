@@ -18,164 +18,136 @@
 
 package org.apache.flink.streaming.runtime.tasks;
 
-import org.apache.flink.core.testutils.OneShotLatch;
+import org.apache.flink.core.execution.SavepointFormatType;
 import org.apache.flink.runtime.checkpoint.CheckpointMetaData;
 import org.apache.flink.runtime.checkpoint.CheckpointOptions;
-import org.apache.flink.runtime.checkpoint.CheckpointType;
+import org.apache.flink.runtime.checkpoint.SavepointType;
 import org.apache.flink.runtime.execution.CancelTaskException;
 import org.apache.flink.runtime.execution.Environment;
 import org.apache.flink.runtime.operators.testutils.DummyEnvironment;
 import org.apache.flink.runtime.state.CheckpointStorageLocationReference;
-import org.apache.flink.streaming.runtime.tasks.StreamTaskTest.NoOpStreamTask;
-import org.apache.flink.streaming.runtime.tasks.mailbox.execution.DefaultActionContext;
+import org.apache.flink.streaming.runtime.tasks.StreamTaskITCase.NoOpStreamTask;
+import org.apache.flink.streaming.runtime.tasks.mailbox.MailboxDefaultAction;
 
 import org.junit.Before;
 import org.junit.Test;
 
-import java.util.concurrent.atomic.AtomicReference;
+import java.util.Queue;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.Executors;
+import java.util.concurrent.LinkedBlockingQueue;
 
 import static org.apache.flink.util.Preconditions.checkNotNull;
-import static org.junit.Assert.assertFalse;
+import static org.hamcrest.Matchers.instanceOf;
+import static org.hamcrest.Matchers.is;
+import static org.junit.Assert.assertThat;
 import static org.junit.Assert.assertTrue;
 import static org.junit.Assert.fail;
 
-/**
- * Tests the synchronous checkpoint execution at the {@link StreamTask}.
- */
+/** Tests the synchronous checkpoint execution at the {@link StreamTask}. */
 public class SynchronousCheckpointTest {
 
-	private OneShotLatch execLatch;
+    private enum Event {
+        TASK_INITIALIZED,
+    }
 
-	private AtomicReference<Throwable> error;
+    private StreamTaskUnderTest streamTaskUnderTest;
+    private CompletableFuture<Void> taskInvocation;
+    private LinkedBlockingQueue<Event> eventQueue = new LinkedBlockingQueue<>();
 
-	private StreamTask streamTaskUnderTest;
-	private Thread mainThreadExecutingTaskUnderTest;
-	private Thread checkpointingThread;
+    @Before
+    public void setupTestEnvironment() throws InterruptedException {
 
-	@Before
-	public void setupTestEnvironment() throws InterruptedException {
-		final OneShotLatch runningLatch = new OneShotLatch();
+        taskInvocation =
+                CompletableFuture.runAsync(
+                        () -> {
+                            try {
+                                streamTaskUnderTest = createTask(eventQueue);
+                                streamTaskUnderTest.invoke();
+                            } catch (RuntimeException e) {
+                                throw e;
+                            } catch (Exception e) {
+                                throw new RuntimeException(e);
+                            }
+                        },
+                        Executors.newSingleThreadExecutor());
 
-		execLatch = new OneShotLatch();
-		error = new AtomicReference<>();
+        // Wait until task has been initialized.
+        assertThat(eventQueue.take(), is(Event.TASK_INITIALIZED));
+    }
 
-		mainThreadExecutingTaskUnderTest = launchOnSeparateThread(() -> {
-			streamTaskUnderTest = createTask(runningLatch, execLatch);
-			try {
-				streamTaskUnderTest.invoke();
-			} catch (Exception e) {
-				error.set(e);
-			}
-		});
-		runningLatch.await();
-	}
+    @Test(timeout = 10_000)
+    public void cancelShouldAlsoCancelPendingSynchronousCheckpoint() throws Throwable {
+        launchSynchronousSavepointAndWaitForSyncSavepointIdToBeSet();
+        assertTrue(streamTaskUnderTest.getSynchronousSavepointId().isPresent());
 
-	@Test(timeout = 1000)
-	public void synchronousCheckpointBlocksUntilNotificationForCorrectCheckpointComes() throws Exception {
-		final SynchronousSavepointLatch syncSavepointLatch = launchSynchronousSavepointAndGetTheLatch();
-		assertFalse(syncSavepointLatch.isCompleted());
+        streamTaskUnderTest.cancel();
 
-		streamTaskUnderTest.notifyCheckpointComplete(41);
-		assertFalse(syncSavepointLatch.isCompleted());
+        waitUntilMainExecutionThreadIsFinished();
 
-		streamTaskUnderTest.notifyCheckpointComplete(42);
-		assertTrue(syncSavepointLatch.isCompleted());
+        assertTrue(streamTaskUnderTest.isCanceled());
+    }
 
-		waitUntilCheckpointingThreadIsFinished();
-		allowTaskToExitTheRunLoop();
-		waitUntilMainExecutionThreadIsFinished();
+    private void launchSynchronousSavepointAndWaitForSyncSavepointIdToBeSet()
+            throws InterruptedException {
+        streamTaskUnderTest.triggerCheckpointAsync(
+                new CheckpointMetaData(42, System.currentTimeMillis()),
+                new CheckpointOptions(
+                        SavepointType.suspend(SavepointFormatType.CANONICAL),
+                        CheckpointStorageLocationReference.getDefault()));
+        waitForSyncSavepointIdToBeSet(streamTaskUnderTest);
+    }
 
-		assertFalse(streamTaskUnderTest.isCanceled());
-	}
+    private void waitUntilMainExecutionThreadIsFinished() {
+        try {
+            taskInvocation.get();
+        } catch (Exception e) {
+            assertThat(e.getCause(), is(instanceOf(CancelTaskException.class)));
+        }
+    }
 
-	@Test(timeout = 1000)
-	public void cancelShouldAlsoCancelPendingSynchronousCheckpoint() throws Throwable {
-		final SynchronousSavepointLatch syncSavepointLatch = launchSynchronousSavepointAndGetTheLatch();
-		assertFalse(syncSavepointLatch.isCompleted());
+    private void waitForSyncSavepointIdToBeSet(final StreamTask streamTaskUnderTest)
+            throws InterruptedException {
 
-		allowTaskToExitTheRunLoop();
+        while (!streamTaskUnderTest.getSynchronousSavepointId().isPresent()) {
+            Thread.sleep(10L);
 
-		assertFalse(syncSavepointLatch.isCompleted());
-		streamTaskUnderTest.cancel();
-		assertTrue(syncSavepointLatch.isCanceled());
+            if (taskInvocation.isDone()) {
+                fail("Task has been terminated too early");
+            }
+        }
+    }
 
-		waitUntilCheckpointingThreadIsFinished();
-		waitUntilMainExecutionThreadIsFinished();
+    private static StreamTaskUnderTest createTask(Queue<Event> eventQueue) throws Exception {
+        final DummyEnvironment environment = new DummyEnvironment("test", 1, 0);
+        return new StreamTaskUnderTest(environment, eventQueue);
+    }
 
-		assertTrue(streamTaskUnderTest.isCanceled());
-	}
+    private static class StreamTaskUnderTest extends NoOpStreamTask {
 
-	private SynchronousSavepointLatch launchSynchronousSavepointAndGetTheLatch() throws InterruptedException {
-		checkpointingThread = launchOnSeparateThread(() -> {
-			try {
-				streamTaskUnderTest.triggerCheckpoint(
-						new CheckpointMetaData(42, System.currentTimeMillis()),
-						new CheckpointOptions(CheckpointType.SYNC_SAVEPOINT, CheckpointStorageLocationReference.getDefault()),
-						false
-				);
-			} catch (Exception e) {
-				error.set(e);
-			}
-		});
-		return waitForSyncSavepointLatchToBeSet(streamTaskUnderTest);
-	}
+        private Queue<Event> eventQueue;
+        private volatile boolean stopped;
 
-	private void waitUntilMainExecutionThreadIsFinished() throws InterruptedException {
-		mainThreadExecutingTaskUnderTest.join();
-	}
+        StreamTaskUnderTest(final Environment env, Queue<Event> eventQueue) throws Exception {
+            super(env);
+            this.eventQueue = checkNotNull(eventQueue);
+        }
 
-	private void waitUntilCheckpointingThreadIsFinished() throws InterruptedException {
-		checkpointingThread.join();
-	}
+        @Override
+        protected void init() {
+            eventQueue.add(Event.TASK_INITIALIZED);
+        }
 
-	private void allowTaskToExitTheRunLoop() {
-		execLatch.trigger();
-	}
+        @Override
+        protected void processInput(MailboxDefaultAction.Controller controller) throws Exception {
+            if (stopped || isCanceled()) {
+                controller.suspendDefaultAction();
+                mailboxProcessor.suspend();
+            }
+        }
 
-	private SynchronousSavepointLatch waitForSyncSavepointLatchToBeSet(final StreamTask streamTaskUnderTest) throws InterruptedException {
-
-		SynchronousSavepointLatch syncSavepointFuture = streamTaskUnderTest.getSynchronousSavepointLatch();
-		while (!syncSavepointFuture.isSet()) {
-			Thread.sleep(10L);
-
-			if (error.get() != null && !(error.get() instanceof CancelTaskException)) {
-				fail();
-			}
-		}
-		return syncSavepointFuture;
-	}
-
-	private Thread launchOnSeparateThread(final Runnable runnable) {
-		final Thread thread = new Thread(runnable);
-		thread.start();
-		return thread;
-	}
-
-	private StreamTask createTask(final OneShotLatch runningLatch, final OneShotLatch execLatch) {
-		final DummyEnvironment environment =
-				new DummyEnvironment("test", 1, 0);
-		return new StreamTaskUnderTest(environment, runningLatch, execLatch);
-	}
-
-	private static class StreamTaskUnderTest extends NoOpStreamTask {
-
-		private final OneShotLatch runningLatch;
-		private final OneShotLatch execLatch;
-
-		StreamTaskUnderTest(
-				final Environment env,
-				final OneShotLatch runningLatch,
-				final OneShotLatch execLatch) {
-			super(env);
-			this.runningLatch = checkNotNull(runningLatch);
-			this.execLatch = checkNotNull(execLatch);
-		}
-
-		@Override
-		protected void performDefaultAction(DefaultActionContext context) throws Exception {
-			runningLatch.trigger();
-			execLatch.await();
-			super.performDefaultAction(context);
-		}
-	}
+        void stopTask() {
+            stopped = true;
+        }
+    }
 }
