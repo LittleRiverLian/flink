@@ -832,6 +832,10 @@ class Expression(Generic[T]):
     def collect(self) -> 'Expression':
         return _unary_op("collect")(self)
 
+    @property
+    def array_agg(self) -> 'Expression':
+        return _unary_op("arrayAgg")(self)
+
     def alias(self, name: str, *extra_names: str) -> 'Expression[T]':
         """
         Specifies a name for an expression i.e. a field.
@@ -1269,6 +1273,23 @@ class Expression(Generic[T]):
         else:
             return _ternary_op("locate")(self, s, pos)
 
+    def url_decode(self) -> 'Expression[str]':
+        """
+        Decodes a given string in 'application/x-www-form-urlencoded' format using the UTF-8
+        encoding scheme. If the input is null, or there is an issue with the decoding process
+        (such as encountering an illegal escape pattern), or the encoding scheme is not supported,
+        the function returns null.
+        """
+        return _unary_op("urlDecode")(self)
+
+    def url_encode(self) -> 'Expression[str]':
+        """
+        Translates a string into 'application/x-www-form-urlencoded' format using the UTF-8
+        encoding scheme. If the input is null, or there is an issue with the encoding process, or
+        the encoding scheme is not supported, will return null.
+        """
+        return _unary_op("urlEncode")(self)
+
     def parse_url(self, part_to_extract: Union[str, 'Expression[str]'],
                   key: Union[str, 'Expression[str]'] = None) -> 'Expression[str]':
         """
@@ -1470,6 +1491,15 @@ class Expression(Generic[T]):
         """
         return _unary_op("element")(self)
 
+    def array_append(self, addition) -> 'Expression':
+        """
+        Appends an element to the end of the array and returns the result.
+
+        If the array itself is null, the function will return null. If an element to add is null,
+        the null element will be added to the end of the array.
+        """
+        return _binary_op("arrayAppend")(self, addition)
+
     def array_contains(self, needle) -> 'Expression':
         """
         Returns whether the given element exists in an array.
@@ -1479,6 +1509,190 @@ class Expression(Generic[T]):
         if necessary.
         """
         return _binary_op("arrayContains")(self, needle)
+
+    def array_distinct(self) -> 'Expression':
+        """
+        Returns an array with unique elements.
+        If the array itself is null, the function will return null. Keeps ordering of elements.
+        """
+        return _binary_op("arrayDistinct")(self)
+
+    def array_position(self, needle) -> 'Expression':
+        """
+        Returns the position of the first occurrence of element in the given array as int.
+
+        Returns 0 if the given value could not be found in the array. Returns null if either of the
+        arguments are null.
+        NOTE: that this is not zero based, but 1-based index. The first element in the array
+        has index 1.
+        """
+        return _binary_op("arrayPosition")(self, needle)
+
+    def array_prepend(self, addition) -> 'Expression':
+        """
+        Appends an element to the beginning of the array and returns the result.
+
+        If the array itself is null, the function will return null. If an element to add is null,
+        the null element will be added to the beginning of the array.
+        """
+        return _binary_op("arrayPrepend")(self, addition)
+
+    def array_remove(self, needle) -> 'Expression':
+        """
+        Removes all elements that equal to element from array.
+        If the array itself is null, the function will return null. Keeps ordering of elements.
+        """
+        return _binary_op("arrayRemove")(self, needle)
+
+    def array_reverse(self) -> 'Expression':
+        """
+        Returns an array in reverse order.
+        If the array itself is null, the function will return null.
+        """
+        return _binary_op("arrayReverse")(self)
+
+    def array_slice(self, start_offset, end_offset=None) -> 'Expression':
+        """
+        Returns a subarray of the input array between 'start_offset' and 'end_offset' inclusive.
+        The offsets are 1-based however 0 is also treated as the beginning of the array.
+        Positive values are counted from the beginning of the array while negative from the end.
+        If 'end_offset' is omitted then this offset is treated as the length of the array.
+        If 'start_offset' is after 'end_offset' or both are out of array bounds an empty array will
+        be returned.
+        Returns null if any input is null.
+        """
+        if end_offset is None:
+            return _binary_op("array_slice")(self, start_offset)
+        else:
+            return _ternary_op("array_slice")(self, start_offset, end_offset)
+
+    def array_sort(self, ascending_order=None, null_first=None) -> 'Expression':
+        """
+        Returns the array in sorted order.
+        The function sorts an array, defaulting to ascending order with NULLs at the start when
+        only the array is input. Specifying ascending_order as true orders the array in ascending
+        with NULLs first, and setting it to false orders it in descending with NULLs last.
+        Independently, null_first as true moves NULLs to the beginning, and as false to the end,
+        irrespective of the sorting order. The function returns null if any input is null.
+        """
+        if ascending_order and null_first is None:
+            return _unary_op("array_sort")(self)
+        elif null_first is None:
+            return _binary_op("array_sort")(self, ascending_order)
+        else:
+            return _ternary_op("array_sort")(self, ascending_order, null_first)
+
+    def array_union(self, array) -> 'Expression':
+        """
+        Returns an array of the elements in the union of array1 and array2, without duplicates.
+        If any of the array is null, the function will return null.
+        """
+        return _binary_op("arrayUnion")(self, array)
+
+    def array_concat(self, *arrays) -> 'Expression':
+        """
+        Returns an array that is the result of concatenating at least one array.
+        This array contains all the elements in the first array, followed by all
+        the elements in the second array, and so forth, up to the Nth array.
+        If any input array is NULL, the function returns NULL.
+        """
+        return _binary_op("arrayConcat")(self, *arrays)
+
+    def array_max(self) -> 'Expression':
+        """
+        Returns the maximum value from the array.
+        if array itself is null, the function returns null.
+        """
+        return _unary_op("arrayMax")(self)
+
+    def array_join(self, delimiter, null_replacement=None) -> 'Expression':
+        """
+        Returns a string that represents the concatenation of the elements in the given array and
+        the elements' data type in the given array is string. The `delimiter` is a string that
+        separates each pair of consecutive elements of the array. The optional `null_replacement`
+        is a string that replaces null elements in the array. If `null_replacement` is not
+        specified, null elements in the array will be omitted from the resulting string.
+        Returns null if input array or delimiter or nullReplacement are null.
+        """
+        if null_replacement is None:
+            return _binary_op("array_join")(self, delimiter)
+        else:
+            return _ternary_op("array_join")(self, delimiter, null_replacement)
+
+    def array_min(self) -> 'Expression':
+        """
+        Returns the minimum value from the array.
+        if array itself is null, the function returns null.
+        """
+        return _unary_op("arrayMin")(self)
+
+    def array_except(self, array) -> 'Expression':
+        """
+        Returns an ARRAY that contains the elements from array1 that are not in array2.
+        If no elements remain after excluding the elements in array2 from array1,
+        the function returns an empty ARRAY. If one or both arguments are NULL,
+        the function returns NULL. The order of the elements from array1 is kept
+        however the duplicates are removed.
+        """
+        return _binary_op("arrayExcept")(self, array)
+
+    def array_intersect(self, array) -> 'Expression':
+        """
+        Returns an ARRAY that contains the elements from array1 that are also in array2,
+        without duplicates. If no elements are both in array1 and array2, the function
+        returns an empty ARRAY. If one or both arguments are NULL, the function returns NULL.
+        The order of the elements from array1 is kept.
+        """
+        return _binary_op("arrayIntersect")(self, array)
+
+    def split(self, delimiter) -> 'Expression':
+        """
+        Returns an array of substrings by splitting the input string based on the given delimiter.
+        If the delimiter is not found in the string, the original string is returned as the only
+        element in the array. If the delimiter is empty, every character in the string is split.
+        If the string or delimiter is null, a null value is returned. If the delimiter is found a
+        t the beginning or end of the string, or there are contiguous delimiters, then an empty
+        string is added to the array.
+        """
+        return _binary_op("split")(self, delimiter)
+
+    @property
+    def map_keys(self) -> 'Expression':
+        """
+        Returns the keys of the map as an array. No order guaranteed.
+
+        .. seealso:: :py:attr:`~Expression.map_keys`
+        """
+        return _unary_op("mapKeys")(self)
+
+    def map_union(self, *maps) -> 'Expression':
+        """
+        Returns a map created by merging at least one map. These maps should have a common map type.
+        If there are overlapping keys, the value from 'map2' will overwrite the value from 'map1',
+        the value from 'map3' will overwrite the value from 'map2',  the value from 'mapn' will
+        overwrite the value from 'map(n-1)'. If any of maps is null, return null.
+
+        .. seealso:: :py:attr:`~Expression.map_union`
+        """
+        return _binary_op("mapUnion")(self, *maps)
+
+    @property
+    def map_values(self) -> 'Expression':
+        """
+        Returns the values of the map as an array. No order guaranteed.
+
+        .. seealso:: :py:attr:`~Expression.map_values`
+        """
+        return _unary_op("mapValues")(self)
+
+    @property
+    def map_entries(self) -> 'Expression':
+        """
+        Returns an array of all entries in the given map. No order guaranteed.
+
+        .. seealso:: :py:attr:`~Expression.map_entries`
+        """
+        return _unary_op("mapEntries")(self)
 
     # ---------------------------- time definition functions -----------------------------
 

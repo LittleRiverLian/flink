@@ -34,8 +34,9 @@ import { DagreComponent } from '@flink-runtime-web/components/dagre/dagre.compon
 import { ResizeComponent } from '@flink-runtime-web/components/resize/resize.component';
 import { NodesItemCorrect, NodesItemLink } from '@flink-runtime-web/interfaces';
 import { JobOverviewListComponent } from '@flink-runtime-web/pages/job/overview/list/job-overview-list.component';
-import { MetricsService } from '@flink-runtime-web/services';
+import { JobService, MetricsService } from '@flink-runtime-web/services';
 import { NzAlertModule } from 'ng-zorro-antd/alert';
+import { NzNotificationService } from 'ng-zorro-antd/notification';
 
 import { JobLocalService } from '../job-local.service';
 
@@ -65,6 +66,8 @@ export class JobOverviewComponent implements OnInit, OnDestroy {
     public readonly elementRef: ElementRef,
     private readonly metricService: MetricsService,
     private readonly jobLocalService: JobLocalService,
+    private readonly jobService: JobService,
+    private readonly notificationService: NzNotificationService,
     private readonly cdr: ChangeDetectorRef
   ) {}
 
@@ -115,6 +118,15 @@ export class JobOverviewComponent implements OnInit, OnDestroy {
     }
   }
 
+  public onRescale(desiredParallelism: Map<string, number>): void {
+    this.jobService.changeDesiredParallelism(this.jobId, desiredParallelism).subscribe(() => {
+      this.notificationService.success(
+        'Rescaling operation.',
+        'Job resources requirements have been updated. Job will now try to rescale.'
+      );
+    });
+  }
+
   public onResizeEnd(): void {
     if (!this.selectedNode) {
       this.dagreComponent.moveToCenter();
@@ -125,7 +137,7 @@ export class JobOverviewComponent implements OnInit, OnDestroy {
   }
 
   public refreshNodesWithMetrics(): void {
-    this.mergeWithBackPressure(this.nodes)
+    this.mergeWithBackPressureAndSkew(this.nodes)
       .pipe(
         mergeMap(nodes => this.mergeWithWatermarks(nodes)),
         takeUntil(this.destroy$)
@@ -138,17 +150,22 @@ export class JobOverviewComponent implements OnInit, OnDestroy {
       });
   }
 
-  private mergeWithBackPressure(nodes: NodesItemCorrect[]): Observable<NodesItemCorrect[]> {
+  private mergeWithBackPressureAndSkew(nodes: NodesItemCorrect[]): Observable<NodesItemCorrect[]> {
     return forkJoin(
       nodes.map(node => {
         return this.metricService
-          .loadAggregatedMetrics(this.jobId, node.id, ['backPressuredTimeMsPerSecond', 'busyTimeMsPerSecond'])
+          .loadMetricsWithAllAggregates(this.jobId, node.id, [
+            'backPressuredTimeMsPerSecond',
+            'busyTimeMsPerSecond',
+            'numRecordsInPerSecond'
+          ])
           .pipe(
             map(result => {
               return {
                 ...node,
-                backPressuredPercentage: Math.min(Math.round(result.backPressuredTimeMsPerSecond / 10), 100),
-                busyPercentage: Math.min(Math.round(result.busyTimeMsPerSecond / 10), 100)
+                backPressuredPercentage: Math.min(Math.round(result.backPressuredTimeMsPerSecond.max / 10), 100),
+                busyPercentage: Math.min(Math.round(result.busyTimeMsPerSecond.max / 10), 100),
+                dataSkewPercentage: result.numRecordsInPerSecond.skew
               };
             })
           );

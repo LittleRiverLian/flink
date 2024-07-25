@@ -17,74 +17,29 @@
 
 # test set a configuration
 SET 'sql-client.execution.result-mode' = 'tableau';
-[INFO] Session property has been set.
+[INFO] Execute statement succeeded.
 !info
 
-SET 'table.sql-dialect' = 'hive';
-[INFO] Session property has been set.
+SET 'table.dml-sync' = 'true';
+[INFO] Execute statement succeeded.
 !info
 
-create catalog hivecatalog with (
- 'type' = 'hive-test',
- 'hive-version' = '2.3.4'
-);
-[INFO] Execute statement succeed.
+# test "ctas"
+CREATE TABLE foo with(
+  'connector' = 'filesystem',
+  'path' = '$VAR_STREAMING_PATH',
+  'format' = 'csv'
+) as select id FROM (VALUES (1)) T(id);
+[INFO] Complete execution of the SQL update statement.
 !info
 
-use catalog hivecatalog;
-[INFO] Execute statement succeed.
-!info
-
-# test SET command
-set table.sql-dialect;
-+------------------------+
-|              variables |
-+------------------------+
-| table.sql-dialect=hive |
-+------------------------+
-1 row in set
-!ok
-
-set k1=v1;
-[INFO] Session property has been set.
-!info
-
-set k1;
-+-----------+
-| variables |
-+-----------+
-|     k1=v1 |
-+-----------+
-1 row in set
-!ok
-
-# test create a hive table to verify the configuration works
-CREATE TABLE hive_table (
-  product_id STRING,
-  product_name STRING,
-  unit_price DECIMAL(10, 4),
-  pv_count BIGINT,
-  like_count BIGINT,
-  comment_count BIGINT,
-  update_time TIMESTAMP,
-  update_user STRING
-) PARTITIONED BY (pt_year STRING, pt_month STRING, pt_day STRING) TBLPROPERTIES (
-  'streaming-source.enable' = 'true'
-);
-[INFO] Execute statement succeed.
-!info
-
-# test "ctas" in Hive Dialect
-CREATE TABLE foo as select 1;
-[INFO] Submitting SQL update statement to the cluster...
-[INFO] SQL update statement has been successfully submitted to the cluster:
-Job ID:
-
+RESET 'table.dml-sync';
+[INFO] Execute statement succeeded.
 !info
 
 SELECT * from foo;
 +----+-------------+
-| op |      _o__c0 |
+| op |          id |
 +----+-------------+
 | +I |           1 |
 +----+-------------+
@@ -92,8 +47,8 @@ Received a total of 1 row
 !ok
 
 # test add jar
-ADD JAR $VAR_UDF_JAR_PATH;
-[INFO] Execute statement succeed.
+ADD JAR '$VAR_UDF_JAR_PATH';
+[INFO] Execute statement succeeded.
 !info
 
 SHOW JARS;
@@ -105,60 +60,59 @@ SHOW JARS;
 1 row in set
 !ok
 
-CREATE FUNCTION hive_add_one as 'HiveAddOneFunc';
-[INFO] Execute statement succeed.
-!info
-
-SELECT hive_add_one(1);
-+----+-------------+
-| op |      _o__c0 |
-+----+-------------+
-| +I |           2 |
-+----+-------------+
-Received a total of 1 row
-!ok
-
 REMOVE JAR '$VAR_UDF_JAR_PATH';
-[INFO] The specified jar is removed from session classloader.
+[INFO] Execute statement succeeded.
 !info
 
 SHOW JARS;
 Empty set
 !ok
 
+reset 'table.resources.download-dir';
+[INFO] Execute statement succeeded.
+!info
+
 # list the configured configuration
 set;
-'execution.attached' = 'true'
-'execution.savepoint-restore-mode' = 'NO_CLAIM'
-'execution.savepoint.ignore-unclaimed-state' = 'false'
-'execution.shutdown-on-attached-exit' = 'false'
-'execution.target' = 'remote'
-'jobmanager.rpc.address' = '$VAR_JOBMANAGER_RPC_ADDRESS'
-'k1' = 'v1'
-'pipeline.classpaths' = ''
-'pipeline.jars' = ''
-'rest.port' = '$VAR_REST_PORT'
-'sql-client.execution.result-mode' = 'tableau'
-'table.exec.legacy-cast-behaviour' = 'DISABLED'
-'table.sql-dialect' = 'hive'
++-------------------------------------------------+-----------+
+|                                             key |     value |
++-------------------------------------------------+-----------+
+|                              execution.attached |      true |
+|             execution.shutdown-on-attached-exit |     false |
+|             execution.state-recovery.claim-mode |  NO_CLAIM |
+| execution.state-recovery.ignore-unclaimed-state |     false |
+|                                execution.target |    remote |
+|                          jobmanager.rpc.address | $VAR_JOBMANAGER_RPC_ADDRESS |
+|                             pipeline.classpaths |        [] |
+|                                   pipeline.jars |        [] |
+|                                       rest.port |     $VAR_REST_PORT |
+|              sql-client.display.print-time-cost |     false |
+|                sql-client.execution.result-mode |   tableau |
+|                table.exec.legacy-cast-behaviour |  DISABLED |
++-------------------------------------------------+-----------+
+12 rows in set
 !ok
 
 # reset the configuration
 reset;
-[INFO] All session properties have been set to their default values.
+[INFO] Execute statement succeeded.
 !info
 
 set;
-'execution.attached' = 'true'
-'execution.savepoint-restore-mode' = 'NO_CLAIM'
-'execution.savepoint.ignore-unclaimed-state' = 'false'
-'execution.shutdown-on-attached-exit' = 'false'
-'execution.target' = 'remote'
-'jobmanager.rpc.address' = '$VAR_JOBMANAGER_RPC_ADDRESS'
-'pipeline.classpaths' = ''
-'pipeline.jars' = ''
-'rest.port' = '$VAR_REST_PORT'
-'table.exec.legacy-cast-behaviour' = 'DISABLED'
++-------------------------------------------------+-----------+
+|                                             key |     value |
++-------------------------------------------------+-----------+
+|                              execution.attached |      true |
+|             execution.shutdown-on-attached-exit |     false |
+|             execution.state-recovery.claim-mode |  NO_CLAIM |
+| execution.state-recovery.ignore-unclaimed-state |     false |
+|                                execution.target |    remote |
+|                          jobmanager.rpc.address | $VAR_JOBMANAGER_RPC_ADDRESS |
+|                             pipeline.classpaths |        [] |
+|                                   pipeline.jars |        [] |
+|                                       rest.port |     $VAR_REST_PORT |
++-------------------------------------------------+-----------+
+9 rows in set
 !ok
 
 # should fail because default dialect doesn't support hive dialect
@@ -179,52 +133,59 @@ org.apache.flink.sql.parser.impl.ParseException: Encountered "STRING" at line 10
 Was expecting one of:
     ")" ...
     "," ...
-
 !error
 
 set 'sql-client.verbose' = 'true';
-[INFO] Session property has been set.
+[INFO] Execute statement succeeded.
 !info
 
 set;
-'execution.attached' = 'true'
-'execution.savepoint-restore-mode' = 'NO_CLAIM'
-'execution.savepoint.ignore-unclaimed-state' = 'false'
-'execution.shutdown-on-attached-exit' = 'false'
-'execution.target' = 'remote'
-'jobmanager.rpc.address' = '$VAR_JOBMANAGER_RPC_ADDRESS'
-'pipeline.classpaths' = ''
-'pipeline.jars' = ''
-'rest.port' = '$VAR_REST_PORT'
-'sql-client.verbose' = 'true'
-'table.exec.legacy-cast-behaviour' = 'DISABLED'
++-------------------------------------------------+-----------+
+|                                             key |     value |
++-------------------------------------------------+-----------+
+|                              execution.attached |      true |
+|             execution.shutdown-on-attached-exit |     false |
+|             execution.state-recovery.claim-mode |  NO_CLAIM |
+| execution.state-recovery.ignore-unclaimed-state |     false |
+|                                execution.target |    remote |
+|                          jobmanager.rpc.address | $VAR_JOBMANAGER_RPC_ADDRESS |
+|                             pipeline.classpaths |        [] |
+|                                   pipeline.jars |        [] |
+|                                       rest.port |     $VAR_REST_PORT |
+|                              sql-client.verbose |      true |
++-------------------------------------------------+-----------+
+10 rows in set
 !ok
 
 set 'execution.attached' = 'false';
-[INFO] Session property has been set.
+[INFO] Execute statement succeeded.
 !info
 
 reset 'execution.attached';
-[INFO] Session property has been reset.
+[INFO] Execute statement succeeded.
 !info
 
 set;
-'execution.attached' = 'true'
-'execution.savepoint-restore-mode' = 'NO_CLAIM'
-'execution.savepoint.ignore-unclaimed-state' = 'false'
-'execution.shutdown-on-attached-exit' = 'false'
-'execution.target' = 'remote'
-'jobmanager.rpc.address' = '$VAR_JOBMANAGER_RPC_ADDRESS'
-'pipeline.classpaths' = ''
-'pipeline.jars' = ''
-'rest.port' = '$VAR_REST_PORT'
-'sql-client.verbose' = 'true'
-'table.exec.legacy-cast-behaviour' = 'DISABLED'
++-------------------------------------------------+-----------+
+|                                             key |     value |
++-------------------------------------------------+-----------+
+|                              execution.attached |      true |
+|             execution.shutdown-on-attached-exit |     false |
+|             execution.state-recovery.claim-mode |  NO_CLAIM |
+| execution.state-recovery.ignore-unclaimed-state |     false |
+|                                execution.target |    remote |
+|                          jobmanager.rpc.address | $VAR_JOBMANAGER_RPC_ADDRESS |
+|                             pipeline.classpaths |        [] |
+|                                   pipeline.jars |        [] |
+|                                       rest.port |     $VAR_REST_PORT |
+|                              sql-client.verbose |      true |
++-------------------------------------------------+-----------+
+10 rows in set
 !ok
 
 # test reset can work with add jar
 ADD JAR '$VAR_UDF_JAR_PATH';
-[INFO] Execute statement succeed.
+[INFO] Execute statement succeeded.
 !info
 
 SHOW JARS;
@@ -237,21 +198,25 @@ SHOW JARS;
 !ok
 
 set;
-'execution.attached' = 'true'
-'execution.savepoint-restore-mode' = 'NO_CLAIM'
-'execution.savepoint.ignore-unclaimed-state' = 'false'
-'execution.shutdown-on-attached-exit' = 'false'
-'execution.target' = 'remote'
-'jobmanager.rpc.address' = 'localhost'
-'pipeline.classpaths' = ''
-'pipeline.jars' = ''
-'rest.port' = '$VAR_REST_PORT'
-'sql-client.verbose' = 'true'
-'table.exec.legacy-cast-behaviour' = 'DISABLED'
++-------------------------------------------------+-----------+
+|                                             key |     value |
++-------------------------------------------------+-----------+
+|                              execution.attached |      true |
+|             execution.shutdown-on-attached-exit |     false |
+|             execution.state-recovery.claim-mode |  NO_CLAIM |
+| execution.state-recovery.ignore-unclaimed-state |     false |
+|                                execution.target |    remote |
+|                          jobmanager.rpc.address | $VAR_JOBMANAGER_RPC_ADDRESS |
+|                             pipeline.classpaths |        [] |
+|                                   pipeline.jars |        [] |
+|                                       rest.port |     $VAR_REST_PORT |
+|                              sql-client.verbose |      true |
++-------------------------------------------------+-----------+
+10 rows in set
 !ok
 
 reset;
-[INFO] All session properties have been set to their default values.
+[INFO] Execute statement succeeded.
 !info
 
 SHOW JARS;
@@ -264,11 +229,15 @@ SHOW JARS;
 !ok
 
 SET 'sql-client.execution.result-mode' = 'tableau';
-[INFO] Session property has been set.
+[INFO] Execute statement succeeded.
+!info
+
+SET 'sql-client.display.print-time-cost' = 'false';
+[INFO] Execute statement succeeded.
 !info
 
 create function func1 as 'LowerUDF' LANGUAGE JAVA;
-[INFO] Execute statement succeed.
+[INFO] Execute statement succeeded.
 !info
 
 SELECT id, func1(str) FROM (VALUES (1, 'Hello World')) AS T(id, str) ;
@@ -281,7 +250,7 @@ Received a total of 1 row
 !ok
 
 REMOVE JAR '$VAR_UDF_JAR_PATH';
-[INFO] The specified jar is removed from session classloader.
+[INFO] Execute statement succeeded.
 !info
 
 SHOW JARS;

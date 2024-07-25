@@ -29,11 +29,11 @@ import org.apache.flink.table.runtime.typeutils.RowDataSerializer
 import org.apache.flink.table.runtime.util.RowDataHarnessAssertor
 import org.apache.flink.table.runtime.util.StreamRecordUtils.{binaryrow, row}
 import org.apache.flink.table.types.logical.LogicalType
+import org.apache.flink.testutils.junit.extensions.parameterized.ParameterizedTestExtension
 import org.apache.flink.types.Row
 
-import org.junit.{Before, Test}
-import org.junit.runner.RunWith
-import org.junit.runners.Parameterized
+import org.junit.jupiter.api.{BeforeEach, TestTemplate}
+import org.junit.jupiter.api.extension.ExtendWith
 
 import java.lang.{Long => JLong}
 import java.time.Duration
@@ -41,17 +41,17 @@ import java.util.concurrent.ConcurrentLinkedQueue
 
 import scala.collection.mutable
 
-@RunWith(classOf[Parameterized])
+@ExtendWith(Array(classOf[ParameterizedTestExtension]))
 class OverAggregateHarnessTest(mode: StateBackendMode) extends HarnessTestBase(mode) {
 
-  @Before
+  @BeforeEach
   override def before(): Unit = {
     super.before()
     val setting = EnvironmentSettings.newInstance().inStreamingMode().build()
     this.tEnv = StreamTableEnvironmentImpl.create(env, setting)
   }
 
-  @Test
+  @TestTemplate
   def testProcTimeBoundedRowsOver(): Unit = {
     val (testHarness, outputType) = createProcTimeBoundedRowsOver
     val assertor = new RowDataHarnessAssertor(outputType)
@@ -126,7 +126,7 @@ class OverAggregateHarnessTest(mode: StateBackendMode) extends HarnessTestBase(m
       : (KeyedOneInputStreamOperatorTestHarness[RowData, RowData, RowData], Array[LogicalType]) = {
     val data = new mutable.MutableList[(Long, String, Long)]
     val t = env.fromCollection(data).toTable(tEnv, 'currtime, 'b, 'c, 'proctime.proctime)
-    tEnv.registerTable("T", t)
+    tEnv.createTemporaryView("T", t)
 
     val sql =
       """
@@ -140,7 +140,7 @@ class OverAggregateHarnessTest(mode: StateBackendMode) extends HarnessTestBase(m
     val t1 = tEnv.sqlQuery(sql)
 
     tEnv.getConfig.setIdleStateRetention(Duration.ofSeconds(2))
-    val testHarness = createHarnessTester(t1.toAppendStream[Row], "OverAggregate")
+    val testHarness = createHarnessTester(t1.toDataStream, "OverAggregate")
     val outputType = Array(
       DataTypes.BIGINT().getLogicalType,
       DataTypes.STRING().getLogicalType,
@@ -154,12 +154,12 @@ class OverAggregateHarnessTest(mode: StateBackendMode) extends HarnessTestBase(m
   }
 
   /** NOTE: all elements at the same proc timestamp have the same value per key */
-  @Test
+  @TestTemplate
   def testProcTimeBoundedRangeOver(): Unit = {
 
     val data = new mutable.MutableList[(Long, String, Long)]
     val t = env.fromCollection(data).toTable(tEnv, 'currtime, 'b, 'c, 'proctime.proctime)
-    tEnv.registerTable("T", t)
+    tEnv.createTemporaryView("T", t)
 
     val sql =
       """
@@ -174,7 +174,7 @@ class OverAggregateHarnessTest(mode: StateBackendMode) extends HarnessTestBase(m
       """.stripMargin
     val t1 = tEnv.sqlQuery(sql)
 
-    val testHarness = createHarnessTester(t1.toAppendStream[Row], "OverAggregate")
+    val testHarness = createHarnessTester(t1.toDataStream, "OverAggregate")
     val assertor = new RowDataHarnessAssertor(
       Array(
         DataTypes.BIGINT().getLogicalType,
@@ -258,12 +258,12 @@ class OverAggregateHarnessTest(mode: StateBackendMode) extends HarnessTestBase(m
     testHarness.close()
   }
 
-  @Test
+  @TestTemplate
   def testProcTimeUnboundedOver(): Unit = {
 
     val data = new mutable.MutableList[(Long, String, Long)]
     val t = env.fromCollection(data).toTable(tEnv, 'currtime, 'b, 'c, 'proctime.proctime)
-    tEnv.registerTable("T", t)
+    tEnv.createTemporaryView("T", t)
 
     val sql =
       """
@@ -277,7 +277,7 @@ class OverAggregateHarnessTest(mode: StateBackendMode) extends HarnessTestBase(m
     val t1 = tEnv.sqlQuery(sql)
 
     tEnv.getConfig.setIdleStateRetention(Duration.ofSeconds(2))
-    val testHarness = createHarnessTester(t1.toAppendStream[Row], "OverAggregate")
+    val testHarness = createHarnessTester(t1.toDataStream, "OverAggregate")
     val assertor = new RowDataHarnessAssertor(
       Array(
         DataTypes.BIGINT().getLogicalType,
@@ -347,12 +347,12 @@ class OverAggregateHarnessTest(mode: StateBackendMode) extends HarnessTestBase(m
   }
 
   /** all elements at the same row-time have the same value per key */
-  @Test
+  @TestTemplate
   def testRowTimeBoundedRangeOver(): Unit = {
 
     val data = new mutable.MutableList[(Long, String, Long)]
     val t = env.fromCollection(data).toTable(tEnv, 'rowtime.rowtime, 'b, 'c)
-    tEnv.registerTable("T", t)
+    tEnv.createTemporaryView("T", t)
 
     val sql =
       """
@@ -367,7 +367,7 @@ class OverAggregateHarnessTest(mode: StateBackendMode) extends HarnessTestBase(m
       """.stripMargin
     val t1 = tEnv.sqlQuery(sql)
 
-    val testHarness = createHarnessTester(t1.toAppendStream[Row], "OverAggregate")
+    val testHarness = createHarnessTester(t1.toDataStream, "OverAggregate")
     val assertor = new RowDataHarnessAssertor(
       Array(
         DataTypes.BIGINT().getLogicalType,
@@ -444,12 +444,12 @@ class OverAggregateHarnessTest(mode: StateBackendMode) extends HarnessTestBase(m
     testHarness.close()
   }
 
-  @Test
+  @TestTemplate
   def testRowTimeBoundedRowsOver(): Unit = {
 
     val data = new mutable.MutableList[(Long, String, Long)]
     val t = env.fromCollection(data).toTable(tEnv, 'rowtime.rowtime, 'b, 'c)
-    tEnv.registerTable("T", t)
+    tEnv.createTemporaryView("T", t)
 
     val sql =
       """
@@ -465,7 +465,7 @@ class OverAggregateHarnessTest(mode: StateBackendMode) extends HarnessTestBase(m
     val t1 = tEnv.sqlQuery(sql)
 
     tEnv.getConfig.setIdleStateRetention(Duration.ofSeconds(1))
-    val testHarness = createHarnessTester(t1.toAppendStream[Row], "OverAggregate")
+    val testHarness = createHarnessTester(t1.toDataStream, "OverAggregate")
     val assertor = new RowDataHarnessAssertor(
       Array(
         DataTypes.BIGINT().getLogicalType,
@@ -571,12 +571,12 @@ class OverAggregateHarnessTest(mode: StateBackendMode) extends HarnessTestBase(m
   }
 
   /** all elements at the same row-time have the same value per key */
-  @Test
+  @TestTemplate
   def testRowTimeUnboundedRangeOver(): Unit = {
 
     val data = new mutable.MutableList[(Long, String, Long)]
     val t = env.fromCollection(data).toTable(tEnv, 'rowtime.rowtime, 'b, 'c)
-    tEnv.registerTable("T", t)
+    tEnv.createTemporaryView("T", t)
 
     val sql =
       """
@@ -592,7 +592,7 @@ class OverAggregateHarnessTest(mode: StateBackendMode) extends HarnessTestBase(m
     val t1 = tEnv.sqlQuery(sql)
 
     tEnv.getConfig.setIdleStateRetention(Duration.ofSeconds(1))
-    val testHarness = createHarnessTester(t1.toAppendStream[Row], "OverAggregate")
+    val testHarness = createHarnessTester(t1.toDataStream, "OverAggregate")
     val assertor = new RowDataHarnessAssertor(
       Array(
         DataTypes.BIGINT().getLogicalType,
@@ -693,12 +693,12 @@ class OverAggregateHarnessTest(mode: StateBackendMode) extends HarnessTestBase(m
     testHarness.close()
   }
 
-  @Test
+  @TestTemplate
   def testRowTimeUnboundedRowsOver(): Unit = {
 
     val data = new mutable.MutableList[(Long, String, Long)]
     val t = env.fromCollection(data).toTable(tEnv, 'rowtime.rowtime, 'b, 'c)
-    tEnv.registerTable("T", t)
+    tEnv.createTemporaryView("T", t)
 
     val sql =
       """
@@ -714,7 +714,7 @@ class OverAggregateHarnessTest(mode: StateBackendMode) extends HarnessTestBase(m
     val t1 = tEnv.sqlQuery(sql)
 
     tEnv.getConfig.setIdleStateRetention(Duration.ofSeconds(1))
-    val testHarness = createHarnessTester(t1.toAppendStream[Row], "OverAggregate")
+    val testHarness = createHarnessTester(t1.toDataStream, "OverAggregate")
     val assertor = new RowDataHarnessAssertor(
       Array(
         DataTypes.BIGINT().getLogicalType,
@@ -813,7 +813,7 @@ class OverAggregateHarnessTest(mode: StateBackendMode) extends HarnessTestBase(m
     testHarness.close()
   }
 
-  @Test
+  @TestTemplate
   def testCloseWithoutOpen(): Unit = {
     val (testHarness, outputType) = createProcTimeBoundedRowsOver
     testHarness.setup(new RowDataSerializer(outputType: _*))

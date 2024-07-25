@@ -19,6 +19,7 @@
 package org.apache.flink.docs.util;
 
 import org.apache.flink.annotation.VisibleForTesting;
+import org.apache.flink.annotation.docs.Documentation;
 import org.apache.flink.configuration.ConfigOption;
 import org.apache.flink.util.function.BiConsumerWithException;
 
@@ -74,20 +75,15 @@ public class ConfigurationOptionLocator {
                 new OptionsClassLocation(
                         "flink-table/flink-sql-client", "org.apache.flink.table.client.config"),
                 new OptionsClassLocation(
-                        "flink-connectors/flink-connector-pulsar",
-                        "org.apache.flink.connector.pulsar.common.config"),
-                new OptionsClassLocation(
-                        "flink-connectors/flink-connector-pulsar",
-                        "org.apache.flink.connector.pulsar.source"),
-                new OptionsClassLocation(
-                        "flink-connectors/flink-connector-pulsar",
-                        "org.apache.flink.connector.pulsar.sink"),
-                new OptionsClassLocation(
                         "flink-libraries/flink-cep", "org.apache.flink.cep.configuration"),
                 new OptionsClassLocation(
                         "flink-dstl/flink-dstl-dfs", "org.apache.flink.changelog.fs"),
                 new OptionsClassLocation(
-                        "flink-table/flink-sql-gateway", "org.apache.flink.table.gateway.rest.util")
+                        "flink-table/flink-sql-gateway",
+                        "org.apache.flink.table.gateway.rest.util"),
+                new OptionsClassLocation(
+                        "flink-external-resources/flink-external-resource-gpu",
+                        "org.apache.flink.externalresource.gpu")
             };
 
     private static final Set<String> EXCLUSIONS =
@@ -99,7 +95,8 @@ public class ConfigurationOptionLocator {
                             "org.apache.flink.streaming.api.environment.CheckpointConfig",
                             "org.apache.flink.contrib.streaming.state.PredefinedOptions",
                             "org.apache.flink.python.PythonConfig",
-                            "org.apache.flink.cep.configuration.SharedBufferCacheConfig"));
+                            "org.apache.flink.cep.configuration.SharedBufferCacheConfig",
+                            "org.apache.flink.table.api.config.LookupJoinHintOptions"));
 
     private static final String DEFAULT_PATH_PREFIX = "src/main/java";
 
@@ -170,12 +167,19 @@ public class ConfigurationOptionLocator {
 
                     if (!EXCLUSIONS.contains(className)) {
                         Class<?> optionsClass = Class.forName(className);
-                        optionClasses.add(optionsClass);
+                        if (shouldBeDocumented(optionsClass)) {
+                            optionClasses.add(optionsClass);
+                        }
                     }
                 }
             }
         }
         return optionClasses;
+    }
+
+    private static boolean shouldBeDocumented(Class<?> clazz) {
+        return clazz.getAnnotation(Deprecated.class) == null
+                && clazz.getAnnotation(Documentation.ExcludeFromDocumentation.class) == null;
     }
 
     @VisibleForTesting

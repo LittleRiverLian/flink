@@ -405,7 +405,7 @@
         <ul>
 <li><code>session_handle</code> - The SessionHandle that identifies a session.</li>
 <li><code>operation_handle</code> - The OperationHandle that identifies a operation.</li>
-<li><code>token</code> - The OperationHandle that identifies a operation.</li>
+<li><code>token</code> - The token that identifies which batch of data to fetch.</li>
         </ul>
       </td>
     </tr>
@@ -424,19 +424,7 @@
           <details>
           <summary>Response</summary>
           <pre><code>{
-  "type" : "object",
-  "id" : "urn:jsonschema:org:apache:flink:table:gateway:rest:message:statement:FetchResultsResponseBody",
-  "properties" : {
-    "nextResultUri" : {
-      "type" : "string"
-    },
-    "resultType" : {
-      "type" : "string"
-    },
-    "results" : {
-      "type" : "any"
-    }
-  }
+  "type" : "any"
 }</code></pre>
         </label>
       </td>

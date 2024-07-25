@@ -113,7 +113,7 @@ public abstract class CommonExecPythonCalc extends ExecNodeBase<RowData>
                 (Transformation<RowData>) inputEdge.translateToPlan(planner);
         final Configuration pythonConfig =
                 CommonPythonUtil.extractPythonConfiguration(
-                        planner.getExecEnv(), config, planner.getFlinkContext().getClassLoader());
+                        planner.getTableConfig(), planner.getFlinkContext().getClassLoader());
         OneInputTransformation<RowData, RowData> ret =
                 createPythonOneInputTransformation(
                         inputTransform,
@@ -187,7 +187,8 @@ public abstract class CommonExecPythonCalc extends ExecNodeBase<RowData>
                 createTransformationMeta(PYTHON_CALC_TRANSFORMATION, config),
                 pythonOperator,
                 pythonOperatorResultTyeInfo,
-                inputTransform.getParallelism());
+                inputTransform.getParallelism(),
+                false);
     }
 
     private Tuple2<int[], PythonFunctionInfo[]> extractPythonScalarFunctionInfos(

@@ -20,18 +20,16 @@ package org.apache.flink.streaming.runtime.operators.windowing;
 
 import org.apache.flink.FlinkVersion;
 import org.apache.flink.api.common.typeutils.TypeSerializer;
-import org.apache.flink.api.common.typeutils.TypeSerializerMatchers;
+import org.apache.flink.api.common.typeutils.TypeSerializerConditions;
 import org.apache.flink.api.common.typeutils.TypeSerializerSchemaCompatibility;
 import org.apache.flink.api.common.typeutils.TypeSerializerUpgradeTestBase;
 import org.apache.flink.streaming.api.windowing.windows.GlobalWindow;
 import org.apache.flink.streaming.api.windowing.windows.TimeWindow;
 
-import org.hamcrest.Matcher;
+import org.assertj.core.api.Condition;
 
 import java.util.ArrayList;
 import java.util.Collection;
-
-import static org.hamcrest.Matchers.is;
 
 /**
  * A {@link TypeSerializerUpgradeTestBase} for {@link TimeWindow.Serializer} and {@link
@@ -39,23 +37,22 @@ import static org.hamcrest.Matchers.is;
  */
 class WindowSerializerUpgradeTest extends TypeSerializerUpgradeTestBase<Object, Object> {
 
-    public Collection<TestSpecification<?, ?>> createTestSpecifications() throws Exception {
+    public Collection<TestSpecification<?, ?>> createTestSpecifications(FlinkVersion flinkVersion)
+            throws Exception {
 
         ArrayList<TestSpecification<?, ?>> testSpecifications = new ArrayList<>();
-        for (FlinkVersion flinkVersion : MIGRATION_VERSIONS) {
-            testSpecifications.add(
-                    new TestSpecification<>(
-                            "time-window-serializer",
-                            flinkVersion,
-                            TimeWindowSerializerSetup.class,
-                            TimeWindowSerializerVerifier.class));
-            testSpecifications.add(
-                    new TestSpecification<>(
-                            "global-window-serializer",
-                            flinkVersion,
-                            GlobalWindowSerializerSetup.class,
-                            GlobalWindowSerializerVerifier.class));
-        }
+        testSpecifications.add(
+                new TestSpecification<>(
+                        "time-window-serializer",
+                        flinkVersion,
+                        TimeWindowSerializerSetup.class,
+                        TimeWindowSerializerVerifier.class));
+        testSpecifications.add(
+                new TestSpecification<>(
+                        "global-window-serializer",
+                        flinkVersion,
+                        GlobalWindowSerializerSetup.class,
+                        GlobalWindowSerializerVerifier.class));
         return testSpecifications;
     }
 
@@ -91,14 +88,15 @@ class WindowSerializerUpgradeTest extends TypeSerializerUpgradeTestBase<Object, 
         }
 
         @Override
-        public Matcher<TimeWindow> testDataMatcher() {
-            return is(new TimeWindow(12345, 67890));
+        public Condition<TimeWindow> testDataCondition() {
+            return new Condition<>(
+                    timeWindow -> new TimeWindow(12345, 67890).equals(timeWindow), "");
         }
 
         @Override
-        public Matcher<TypeSerializerSchemaCompatibility<TimeWindow>> schemaCompatibilityMatcher(
-                FlinkVersion version) {
-            return TypeSerializerMatchers.isCompatibleAsIs();
+        public Condition<TypeSerializerSchemaCompatibility<TimeWindow>>
+                schemaCompatibilityCondition(FlinkVersion version) {
+            return TypeSerializerConditions.isCompatibleAsIs();
         }
     }
 
@@ -134,14 +132,14 @@ class WindowSerializerUpgradeTest extends TypeSerializerUpgradeTestBase<Object, 
         }
 
         @Override
-        public Matcher<GlobalWindow> testDataMatcher() {
-            return is(GlobalWindow.get());
+        public Condition<GlobalWindow> testDataCondition() {
+            return new Condition<>(GlobalWindow.get()::equals, "");
         }
 
         @Override
-        public Matcher<TypeSerializerSchemaCompatibility<GlobalWindow>> schemaCompatibilityMatcher(
-                FlinkVersion version) {
-            return TypeSerializerMatchers.isCompatibleAsIs();
+        public Condition<TypeSerializerSchemaCompatibility<GlobalWindow>>
+                schemaCompatibilityCondition(FlinkVersion version) {
+            return TypeSerializerConditions.isCompatibleAsIs();
         }
     }
 }

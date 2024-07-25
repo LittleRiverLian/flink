@@ -24,6 +24,7 @@ import org.apache.flink.core.memory.MemorySegmentFactory;
 import org.apache.flink.core.testutils.CheckedThread;
 import org.apache.flink.runtime.event.AbstractEvent;
 import org.apache.flink.runtime.executiongraph.IOMetrics;
+import org.apache.flink.runtime.executiongraph.ResultPartitionBytes;
 import org.apache.flink.runtime.io.disk.BatchShuffleReadBufferPool;
 import org.apache.flink.runtime.io.disk.FileChannelManager;
 import org.apache.flink.runtime.io.disk.FileChannelManagerImpl;
@@ -40,15 +41,17 @@ import org.apache.flink.runtime.io.network.partition.ResultPartitionID;
 import org.apache.flink.runtime.io.network.partition.ResultPartitionManager;
 import org.apache.flink.runtime.io.network.partition.ResultPartitionType;
 import org.apache.flink.runtime.io.network.partition.ResultSubpartition;
+import org.apache.flink.runtime.io.network.partition.ResultSubpartitionIndexSet;
 import org.apache.flink.runtime.io.network.partition.ResultSubpartitionView;
 import org.apache.flink.runtime.metrics.groups.TaskIOMetricGroup;
 import org.apache.flink.runtime.metrics.groups.UnregisteredMetricGroups;
 import org.apache.flink.util.IOUtils;
+import org.apache.flink.util.concurrent.ExecutorThreadFactory;
+import org.apache.flink.util.concurrent.IgnoreShutdownRejectedExecutionHandler;
 
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
-import org.junit.jupiter.api.Timeout;
 import org.junit.jupiter.api.io.TempDir;
 
 import java.io.IOException;
@@ -60,13 +63,14 @@ import java.util.Arrays;
 import java.util.List;
 import java.util.Queue;
 import java.util.Random;
-import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.ScheduledThreadPoolExecutor;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.BiConsumer;
 
 import static org.apache.flink.util.Preconditions.checkNotNull;
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatNoException;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /** Tests for {@link HsResultPartition}. */
@@ -98,7 +102,11 @@ class HsResultPartitionTest {
                 new FileChannelManagerImpl(new String[] {tempDataPath.toString()}, "testing");
         globalPool = new NetworkBufferPool(totalBuffers, bufferSize);
         readBufferPool = new BatchShuffleReadBufferPool(totalBytes, bufferSize);
-        readIOExecutor = Executors.newScheduledThreadPool(numThreads);
+        readIOExecutor =
+                new ScheduledThreadPoolExecutor(
+                        numThreads,
+                        new ExecutorThreadFactory("test-io-scheduler-thread"),
+                        new IgnoreShutdownRejectedExecutionHandler());
     }
 
     @AfterEach
@@ -166,7 +174,7 @@ class HsResultPartitionTest {
                         dataWritten,
                         subpartition,
                         numBytesWritten,
-                        Buffer.DataType.EVENT_BUFFER);
+                        Buffer.DataType.END_OF_PARTITION);
             }
 
             Tuple2<ResultSubpartitionView, TestingBufferAvailabilityListener>[] viewAndListeners =
@@ -221,6 +229,117 @@ class HsResultPartitionTest {
         }
     }
 
+    /** Test write and read data from single subpartition with multiple consumer. */
+    @Test
+    void testMultipleConsumer() throws Exception {
+        final int numBuffers = 10;
+        final int numRecords = 10;
+        final int numConsumers = 2;
+        final int targetSubpartition = 0;
+        final Random random = new Random();
+
+        BufferPool bufferPool = globalPool.createBufferPool(numBuffers, numBuffers);
+        try (HsResultPartition resultPartition = createHsResultPartition(2, bufferPool)) {
+            List<ByteBuffer> dataWritten = new ArrayList<>();
+            for (int i = 0; i < numRecords; i++) {
+                ByteBuffer record = generateRandomData(bufferSize, random);
+                resultPartition.emitRecord(record, targetSubpartition);
+                dataWritten.add(record);
+            }
+            resultPartition.finish();
+
+            Tuple2[] viewAndListeners =
+                    createMultipleConsumerView(resultPartition, targetSubpartition, 2);
+
+            List<List<Buffer>> dataRead = new ArrayList<>();
+            for (int i = 0; i < numConsumers; i++) {
+                dataRead.add(new ArrayList<>());
+            }
+            readData(
+                    viewAndListeners,
+                    (buffer, subpartition) -> {
+                        int numBytes = buffer.readableBytes();
+                        if (buffer.isBuffer()) {
+                            MemorySegment segment =
+                                    MemorySegmentFactory.allocateUnpooledSegment(numBytes);
+                            segment.put(0, buffer.getNioBufferReadable(), numBytes);
+                            dataRead.get(subpartition)
+                                    .add(
+                                            new NetworkBuffer(
+                                                    segment,
+                                                    (buf) -> {},
+                                                    buffer.getDataType(),
+                                                    numBytes));
+                        }
+                    });
+
+            for (int i = 0; i < numConsumers; i++) {
+                assertThat(dataWritten).hasSameSizeAs(dataRead.get(i));
+                List<Buffer> readBufferList = dataRead.get(i);
+                for (int j = 0; j < dataWritten.size(); j++) {
+                    ByteBuffer bufferWritten = dataWritten.get(j);
+                    bufferWritten.rewind();
+                    Buffer bufferRead = readBufferList.get(j);
+                    assertThat(bufferRead.getNioBufferReadable()).isEqualTo(bufferWritten);
+                }
+            }
+        }
+    }
+
+    @Test
+    void testBroadcastResultPartition() throws Exception {
+        final int numBuffers = 10;
+        final int numRecords = 10;
+        final int numConsumers = 2;
+        final Random random = new Random();
+
+        BufferPool bufferPool = globalPool.createBufferPool(numBuffers, numBuffers);
+        try (HsResultPartition resultPartition = createHsResultPartition(2, bufferPool, true)) {
+            List<ByteBuffer> dataWritten = new ArrayList<>();
+            for (int i = 0; i < numRecords; i++) {
+                ByteBuffer record = generateRandomData(bufferSize, random);
+                resultPartition.broadcastRecord(record);
+                dataWritten.add(record);
+            }
+            resultPartition.finish();
+
+            Tuple2[] viewAndListeners = createSubpartitionViews(resultPartition, 2);
+
+            List<List<Buffer>> dataRead = new ArrayList<>();
+            for (int i = 0; i < numConsumers; i++) {
+                dataRead.add(new ArrayList<>());
+            }
+            readData(
+                    viewAndListeners,
+                    (buffer, subpartition) -> {
+                        int numBytes = buffer.readableBytes();
+                        if (buffer.isBuffer()) {
+                            MemorySegment segment =
+                                    MemorySegmentFactory.allocateUnpooledSegment(numBytes);
+                            segment.put(0, buffer.getNioBufferReadable(), numBytes);
+                            dataRead.get(subpartition)
+                                    .add(
+                                            new NetworkBuffer(
+                                                    segment,
+                                                    (buf) -> {},
+                                                    buffer.getDataType(),
+                                                    numBytes));
+                        }
+                    });
+
+            for (int i = 0; i < numConsumers; i++) {
+                assertThat(dataWritten).hasSameSizeAs(dataRead.get(i));
+                List<Buffer> readBufferList = dataRead.get(i);
+                for (int j = 0; j < dataWritten.size(); j++) {
+                    ByteBuffer bufferWritten = dataWritten.get(j);
+                    bufferWritten.rewind();
+                    Buffer bufferRead = readBufferList.get(j);
+                    assertThat(bufferRead.getNioBufferReadable()).isEqualTo(bufferWritten);
+                }
+            }
+        }
+    }
+
     @Test
     void testClose() throws Exception {
         final int numBuffers = 1;
@@ -234,7 +353,6 @@ class HsResultPartitionTest {
     }
 
     @Test
-    @Timeout(30)
     void testRelease() throws Exception {
         final int numSubpartitions = 2;
         final int numBuffers = 10;
@@ -274,7 +392,8 @@ class HsResultPartitionTest {
         assertThatThrownBy(
                         () ->
                                 resultPartition.createSubpartitionView(
-                                        0, new NoOpBufferAvailablityListener()))
+                                        new ResultSubpartitionIndexSet(0),
+                                        new NoOpBufferAvailablityListener()))
                 .isInstanceOf(IllegalStateException.class);
     }
 
@@ -287,16 +406,26 @@ class HsResultPartitionTest {
         assertThatThrownBy(
                         () ->
                                 resultPartition.createSubpartitionView(
-                                        0, new NoOpBufferAvailablityListener()))
+                                        new ResultSubpartitionIndexSet(0),
+                                        new NoOpBufferAvailablityListener()))
                 .isInstanceOf(PartitionNotFoundException.class);
     }
 
     @Test
     void testAvailability() throws Exception {
         final int numBuffers = 2;
+        final int numSubpartitions = 1;
 
         BufferPool bufferPool = globalPool.createBufferPool(numBuffers, numBuffers);
-        HsResultPartition partition = createHsResultPartition(1, bufferPool);
+        HsResultPartition partition =
+                createHsResultPartition(
+                        numSubpartitions,
+                        bufferPool,
+                        HybridShuffleConfiguration.builder(
+                                        numSubpartitions, readBufferPool.getNumBuffersPerRequest())
+                                // Do not return buffer to bufferPool when memory is insufficient.
+                                .setFullStrategyReleaseBufferRatio(0)
+                                .build());
 
         partition.emitRecord(ByteBuffer.allocate(bufferSize * numBuffers), 0);
         assertThat(partition.isAvailable()).isFalse();
@@ -318,9 +447,76 @@ class HsResultPartitionTest {
             assertThat(taskIOMetricGroup.getNumBytesOutCounter().getCount())
                     .isEqualTo(3 * bufferSize);
             IOMetrics ioMetrics = taskIOMetricGroup.createSnapshot();
-            assertThat(ioMetrics.getNumBytesProducedOfPartitions())
-                    .hasSize(1)
-                    .containsValue((long) 2 * bufferSize);
+            assertThat(ioMetrics.getResultPartitionBytes()).hasSize(1);
+            ResultPartitionBytes partitionBytes =
+                    ioMetrics.getResultPartitionBytes().values().iterator().next();
+            assertThat(partitionBytes.getSubpartitionBytes())
+                    .containsExactly((long) 2 * bufferSize, (long) bufferSize);
+        }
+    }
+
+    @Test
+    void testSelectiveSpillingStrategyRegisterMultipleConsumer() throws Exception {
+        final int numSubpartitions = 2;
+        BufferPool bufferPool = globalPool.createBufferPool(2, 2);
+        try (HsResultPartition partition =
+                createHsResultPartition(
+                        2,
+                        bufferPool,
+                        HybridShuffleConfiguration.builder(
+                                        numSubpartitions, readBufferPool.getNumBuffersPerRequest())
+                                .setSpillingStrategyType(
+                                        HybridShuffleConfiguration.SpillingStrategyType.SELECTIVE)
+                                .build())) {
+            partition.createSubpartitionView(
+                    new ResultSubpartitionIndexSet(0), new NoOpBufferAvailablityListener());
+            assertThatThrownBy(
+                            () ->
+                                    partition.createSubpartitionView(
+                                            new ResultSubpartitionIndexSet(0),
+                                            new NoOpBufferAvailablityListener()))
+                    .isInstanceOf(IllegalStateException.class)
+                    .hasMessageContaining("Multiple consumer is not allowed");
+        }
+    }
+
+    @Test
+    void testFullSpillingStrategyRegisterMultipleConsumer() throws Exception {
+        final int numSubpartitions = 2;
+        BufferPool bufferPool = globalPool.createBufferPool(2, 2);
+        try (HsResultPartition partition =
+                createHsResultPartition(
+                        2,
+                        bufferPool,
+                        HybridShuffleConfiguration.builder(
+                                        numSubpartitions, readBufferPool.getNumBuffersPerRequest())
+                                .setSpillingStrategyType(
+                                        HybridShuffleConfiguration.SpillingStrategyType.FULL)
+                                .build())) {
+            partition.createSubpartitionView(
+                    new ResultSubpartitionIndexSet(0), new NoOpBufferAvailablityListener());
+            assertThatNoException()
+                    .isThrownBy(
+                            () ->
+                                    partition.createSubpartitionView(
+                                            new ResultSubpartitionIndexSet(0),
+                                            new NoOpBufferAvailablityListener()));
+        }
+    }
+
+    @Test
+    void testMetricsUpdateForBroadcastOnlyResultPartition() throws Exception {
+        BufferPool bufferPool = globalPool.createBufferPool(3, 3);
+        try (HsResultPartition partition = createHsResultPartition(2, bufferPool, true)) {
+            partition.broadcastRecord(ByteBuffer.allocate(bufferSize));
+            assertThat(taskIOMetricGroup.getNumBuffersOutCounter().getCount()).isEqualTo(1);
+            assertThat(taskIOMetricGroup.getNumBytesOutCounter().getCount()).isEqualTo(bufferSize);
+            IOMetrics ioMetrics = taskIOMetricGroup.createSnapshot();
+            assertThat(ioMetrics.getResultPartitionBytes()).hasSize(1);
+            ResultPartitionBytes partitionBytes =
+                    ioMetrics.getResultPartitionBytes().values().iterator().next();
+            assertThat(partitionBytes.getSubpartitionBytes())
+                    .containsExactly((long) bufferSize, (long) bufferSize);
         }
     }
 
@@ -390,9 +586,25 @@ class HsResultPartitionTest {
 
     private HsResultPartition createHsResultPartition(int numSubpartitions, BufferPool bufferPool)
             throws IOException {
+        return createHsResultPartition(numSubpartitions, bufferPool, false);
+    }
+
+    private HsResultPartition createHsResultPartition(
+            int numSubpartitions,
+            BufferPool bufferPool,
+            HybridShuffleConfiguration hybridShuffleConfiguration)
+            throws IOException {
+        return createHsResultPartition(
+                numSubpartitions, bufferPool, false, hybridShuffleConfiguration);
+    }
+
+    private HsResultPartition createHsResultPartition(
+            int numSubpartitions, BufferPool bufferPool, boolean isBroadcastOnly)
+            throws IOException {
         return createHsResultPartition(
                 numSubpartitions,
                 bufferPool,
+                isBroadcastOnly,
                 HybridShuffleConfiguration.builder(
                                 numSubpartitions, readBufferPool.getNumBuffersPerRequest())
                         .build());
@@ -401,6 +613,7 @@ class HsResultPartitionTest {
     private HsResultPartition createHsResultPartition(
             int numSubpartitions,
             BufferPool bufferPool,
+            boolean isBroadcastOnly,
             HybridShuffleConfiguration hybridShuffleConfiguration)
             throws IOException {
         HsResultPartition hsResultPartition =
@@ -418,6 +631,7 @@ class HsResultPartitionTest {
                         bufferSize,
                         hybridShuffleConfiguration,
                         null,
+                        isBroadcastOnly,
                         () -> bufferPool);
         taskIOMetricGroup =
                 UnregisteredMetricGroups.createUnregisteredTaskMetricGroup().getIOMetricGroup();
@@ -479,7 +693,28 @@ class HsResultPartitionTest {
         for (int subpartition = 0; subpartition < numSubpartitions; ++subpartition) {
             TestingBufferAvailabilityListener listener = new TestingBufferAvailabilityListener();
             viewAndListeners[subpartition] =
-                    Tuple2.of(partition.createSubpartitionView(subpartition, listener), listener);
+                    Tuple2.of(
+                            partition.createSubpartitionView(
+                                    new ResultSubpartitionIndexSet(subpartition), listener),
+                            listener);
+        }
+        return viewAndListeners;
+    }
+
+    /** Create multiple consumer and bufferAvailabilityListener for single subpartition. */
+    private Tuple2<ResultSubpartitionView, TestingBufferAvailabilityListener>[]
+            createMultipleConsumerView(
+                    HsResultPartition partition, int subpartitionId, int numConsumers)
+                    throws Exception {
+        Tuple2<ResultSubpartitionView, TestingBufferAvailabilityListener>[] viewAndListeners =
+                new Tuple2[numConsumers];
+        for (int consumer = 0; consumer < numConsumers; ++consumer) {
+            TestingBufferAvailabilityListener listener = new TestingBufferAvailabilityListener();
+            viewAndListeners[consumer] =
+                    Tuple2.of(
+                            partition.createSubpartitionView(
+                                    new ResultSubpartitionIndexSet(subpartitionId), listener),
+                            listener);
         }
         return viewAndListeners;
     }
@@ -490,7 +725,7 @@ class HsResultPartitionTest {
         private int numNotifications;
 
         @Override
-        public synchronized void notifyDataAvailable() {
+        public synchronized void notifyDataAvailable(ResultSubpartitionView view) {
             if (numNotifications == 0) {
                 notifyAll();
             }

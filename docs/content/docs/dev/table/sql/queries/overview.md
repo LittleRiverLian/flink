@@ -77,6 +77,7 @@ final Schema schema = Schema.newBuilder()
 
 final TableDescriptor sinkDescriptor = TableDescriptor.forConnector("filesystem")
     .schema(schema)
+    .option("path", "/path/to/file")    
     .format(FormatDescriptor.forFormat("csv")
         .option("field-delimiter", ",")
         .build())
@@ -206,9 +207,9 @@ val env = StreamExecutionEnvironment.getExecutionEnvironment()
 val tableEnv = StreamTableEnvironment.create(env, settings)
 // enable checkpointing
 tableEnv.getConfig.set(
-  ExecutionCheckpointingOptions.CHECKPOINTING_MODE, CheckpointingMode.EXACTLY_ONCE)
+  CheckpointingOptions.CHECKPOINTING_MODE, CheckpointingMode.EXACTLY_ONCE)
 tableEnv.getConfig.set(
-  ExecutionCheckpointingOptions.CHECKPOINTING_INTERVAL, Duration.ofSeconds(10))
+  CheckpointingOptions.CHECKPOINTING_INTERVAL, Duration.ofSeconds(10))
 
 tableEnv.executeSql("CREATE TABLE Orders (`user` BIGINT, product STRING, amount INT) WITH (...)")
 
@@ -444,5 +445,6 @@ Unicode characters are supported in string literals. If explicit unicode code po
 - [Window Top-N]({{< ref "docs/dev/table/sql/queries/window-topn" >}})
 - [Deduplication]({{< ref "docs/dev/table/sql/queries/deduplication" >}})
 - [Pattern Recognition]({{< ref "docs/dev/table/sql/queries/match_recognize" >}})
+- [Time Travel]({{< ref "docs/dev/table/sql/queries/time-travel" >}})
 
 {{< top >}}

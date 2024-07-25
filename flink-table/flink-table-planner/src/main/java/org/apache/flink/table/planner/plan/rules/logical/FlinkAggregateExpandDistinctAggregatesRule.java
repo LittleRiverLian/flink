@@ -470,7 +470,7 @@ public final class FlinkAggregateExpandDistinctAggregatesRule extends RelOptRule
                                 aggCall.left.filterArg,
                                 aggregate.getGroupCount(),
                                 fullGroupSet.cardinality());
-                distinctAggCalls.add(newAggCall.rename(aggCall.right));
+                distinctAggCalls.add(newAggCall.withName(aggCall.right));
             }
         }
 
@@ -821,6 +821,7 @@ public final class FlinkAggregateExpandDistinctAggregatesRule extends RelOptRule
                             false,
                             newArgs,
                             newFilterArg,
+                            null,
                             RelCollations.EMPTY,
                             aggCall.getType(),
                             aggCall.getName());
@@ -914,6 +915,7 @@ public final class FlinkAggregateExpandDistinctAggregatesRule extends RelOptRule
                             false,
                             newArgs,
                             -1,
+                            null,
                             RelCollations.EMPTY,
                             aggCall.getType(),
                             aggCall.getName());

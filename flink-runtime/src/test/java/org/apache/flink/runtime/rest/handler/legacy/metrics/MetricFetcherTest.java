@@ -37,12 +37,10 @@ import org.apache.flink.runtime.webmonitor.RestfulGateway;
 import org.apache.flink.runtime.webmonitor.TestingRestfulGateway;
 import org.apache.flink.runtime.webmonitor.retriever.GatewayRetriever;
 import org.apache.flink.runtime.webmonitor.retriever.MetricQueryServiceGateway;
-import org.apache.flink.util.TestLoggerExtension;
 import org.apache.flink.util.concurrent.Executors;
 import org.apache.flink.util.concurrent.FutureUtils;
 
 import org.junit.jupiter.api.Test;
-import org.junit.jupiter.api.extension.ExtendWith;
 
 import javax.annotation.Nullable;
 
@@ -56,7 +54,6 @@ import java.util.concurrent.atomic.AtomicInteger;
 import static org.assertj.core.api.Assertions.assertThat;
 
 /** Tests for the MetricFetcher. */
-@ExtendWith(TestLoggerExtension.class)
 class MetricFetcherTest {
     @Test
     void testUpdate() {
@@ -70,7 +67,7 @@ class MetricFetcherTest {
                         jobID,
                         tmRID,
                         timeout,
-                        MetricOptions.METRIC_FETCHER_UPDATE_INTERVAL.defaultValue(),
+                        MetricOptions.METRIC_FETCHER_UPDATE_INTERVAL.defaultValue().toMillis(),
                         0,
                         null);
 
@@ -109,6 +106,11 @@ class MetricFetcherTest {
                                     .metrics
                                     .get("2.opname.abc.oc"))
                     .isEqualTo("1");
+            assertThat(
+                            store.getTaskMetricStore(jobID.toString(), "taskid")
+                                    .getJobManagerOperatorMetricStore()
+                                    .getMetric("opname.abc.joc"))
+                    .isEqualTo("3");
         }
     }
 
@@ -121,9 +123,11 @@ class MetricFetcherTest {
 
         SimpleCounter c1 = new SimpleCounter();
         SimpleCounter c2 = new SimpleCounter();
+        SimpleCounter c3 = new SimpleCounter();
 
         c1.inc(1);
         c2.inc(2);
+        c3.inc(3);
 
         counters.put(
                 c1,
@@ -137,6 +141,12 @@ class MetricFetcherTest {
                         new QueryScopeInfo.TaskQueryScopeInfo(
                                 jobID.toString(), "taskid", 2, 0, "abc"),
                         "tc"));
+        counters.put(
+                c3,
+                new Tuple2<>(
+                        new QueryScopeInfo.JobManagerOperatorQueryScopeInfo(
+                                jobID.toString(), "taskid", "opname", "abc"),
+                        "joc"));
         meters.put(
                 new Meter() {
                     @Override

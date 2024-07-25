@@ -22,6 +22,7 @@ import org.apache.flink.annotation.VisibleForTesting;
 import org.apache.flink.connector.file.src.FileSourceSplit;
 import org.apache.flink.connector.file.src.enumerate.FileEnumerator;
 import org.apache.flink.connectors.hive.read.HiveSourceSplit;
+import org.apache.flink.connectors.hive.util.HivePartitionUtils;
 import org.apache.flink.core.fs.Path;
 import org.apache.flink.util.Preconditions;
 
@@ -201,6 +202,10 @@ public class HiveSourceFileEnumerator implements FileEnumerator {
         return numFiles;
     }
 
+    public List<HiveTablePartition> getPartitions() {
+        return this.partitions;
+    }
+
     private static long getSplitMaxSize(JobConf jobConf) {
         return jobConf.getLong(
                 HiveOptions.TABLE_EXEC_HIVE_SPLIT_MAX_BYTES.key(),
@@ -224,17 +229,21 @@ public class HiveSourceFileEnumerator implements FileEnumerator {
 
         private static final long serialVersionUID = 1L;
 
-        private final List<HiveTablePartition> partitions;
+        // The binary HiveTablePartition list, serialize it manually at compile time to avoid
+        // deserializing it in TaskManager during runtime.
+        private final List<byte[]> partitionBytes;
         private final JobConfWrapper jobConfWrapper;
 
-        public Provider(List<HiveTablePartition> partitions, JobConfWrapper jobConfWrapper) {
-            this.partitions = partitions;
+        public Provider(List<byte[]> partitionBytes, JobConfWrapper jobConfWrapper) {
+            this.partitionBytes = partitionBytes;
             this.jobConfWrapper = jobConfWrapper;
         }
 
         @Override
         public FileEnumerator create() {
-            return new HiveSourceFileEnumerator(partitions, jobConfWrapper.conf());
+            return new HiveSourceFileEnumerator(
+                    HivePartitionUtils.deserializeHiveTablePartition(partitionBytes),
+                    jobConfWrapper.conf());
         }
     }
 
