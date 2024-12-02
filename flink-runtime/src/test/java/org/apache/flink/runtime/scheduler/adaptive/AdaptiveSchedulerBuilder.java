@@ -17,8 +17,8 @@
 
 package org.apache.flink.runtime.scheduler.adaptive;
 
-import org.apache.flink.api.common.time.Time;
 import org.apache.flink.configuration.Configuration;
+import org.apache.flink.configuration.StateRecoveryOptions;
 import org.apache.flink.core.failure.FailureEnricher;
 import org.apache.flink.runtime.blob.BlobWriter;
 import org.apache.flink.runtime.blob.VoidBlobWriter;
@@ -52,6 +52,7 @@ import org.apache.flink.util.FatalExitExceptionHandler;
 
 import javax.annotation.Nullable;
 
+import java.time.Duration;
 import java.util.Collection;
 import java.util.Collections;
 import java.util.concurrent.ScheduledExecutorService;
@@ -60,7 +61,7 @@ import java.util.function.Function;
 
 /** Builder for {@link AdaptiveScheduler}. */
 public class AdaptiveSchedulerBuilder {
-    private static final Time DEFAULT_TIMEOUT = Time.seconds(300);
+    private static final Duration DEFAULT_TIMEOUT = Duration.ofSeconds(300);
 
     private final JobGraph jobGraph;
 
@@ -75,7 +76,7 @@ public class AdaptiveSchedulerBuilder {
     private CheckpointRecoveryFactory checkpointRecoveryFactory =
             new StandaloneCheckpointRecoveryFactory();
     private DeclarativeSlotPool declarativeSlotPool;
-    private Time rpcTimeout = DEFAULT_TIMEOUT;
+    private Duration rpcTimeout = DEFAULT_TIMEOUT;
     private BlobWriter blobWriter = VoidBlobWriter.getInstance();
     private JobManagerJobMetricGroup jobManagerJobMetricGroup =
             UnregisteredMetricGroups.createUnregisteredJobManagerJobMetricGroup();
@@ -96,7 +97,8 @@ public class AdaptiveSchedulerBuilder {
     /**
      * {@code null} indicates that the default factory will be used based on the set configuration.
      */
-    @Nullable private RescaleManager.Factory rescaleManagerFactory = null;
+    @Nullable
+    private AdaptiveScheduler.StateTransitionManagerFactory stateTransitionManagerFactory = null;
 
     private BiFunction<JobManagerJobMetricGroup, CheckpointStatsListener, CheckpointStatsTracker>
             checkpointStatsTrackerFactory =
@@ -117,7 +119,9 @@ public class AdaptiveSchedulerBuilder {
                         new DefaultAllocatedSlotPool(),
                         ignored -> {},
                         DEFAULT_TIMEOUT,
-                        rpcTimeout);
+                        rpcTimeout,
+                        Duration.ZERO,
+                        mainThreadExecutor);
         this.executorService = executorService;
     }
 
@@ -156,7 +160,7 @@ public class AdaptiveSchedulerBuilder {
         return this;
     }
 
-    public AdaptiveSchedulerBuilder setRpcTimeout(final Time rpcTimeout) {
+    public AdaptiveSchedulerBuilder setRpcTimeout(final Duration rpcTimeout) {
         this.rpcTimeout = rpcTimeout;
         return this;
     }
@@ -221,9 +225,10 @@ public class AdaptiveSchedulerBuilder {
         return this;
     }
 
-    public AdaptiveSchedulerBuilder setRescaleManagerFactory(
-            @Nullable RescaleManager.Factory rescaleManagerFactory) {
-        this.rescaleManagerFactory = rescaleManagerFactory;
+    public AdaptiveSchedulerBuilder setStateTransitionManagerFactory(
+            @Nullable
+                    AdaptiveScheduler.StateTransitionManagerFactory stateTransitionManagerFactory) {
+        this.stateTransitionManagerFactory = stateTransitionManagerFactory;
         return this;
     }
 
@@ -256,9 +261,9 @@ public class AdaptiveSchedulerBuilder {
                 AdaptiveScheduler.Settings.of(jobMasterConfiguration);
         return new AdaptiveScheduler(
                 settings,
-                rescaleManagerFactory == null
-                        ? DefaultRescaleManager.Factory.fromSettings(settings)
-                        : rescaleManagerFactory,
+                stateTransitionManagerFactory == null
+                        ? DefaultStateTransitionManager::new
+                        : stateTransitionManagerFactory,
                 checkpointStatsTrackerFactory,
                 jobGraph,
                 jobResourceRequirements,
@@ -266,7 +271,8 @@ public class AdaptiveSchedulerBuilder {
                 declarativeSlotPool,
                 slotAllocator == null
                         ? AdaptiveSchedulerFactory.createSlotSharingSlotAllocator(
-                                declarativeSlotPool)
+                                declarativeSlotPool,
+                                jobMasterConfiguration.get(StateRecoveryOptions.LOCAL_RECOVERY))
                         : slotAllocator,
                 executorService,
                 userCodeLoader,
